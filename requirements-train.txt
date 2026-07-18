@@ -1,0 +1,4 @@
+# Install a CUDA-compatible PyTorch wheel first when your platform requires a
+# specific CUDA index, then install this file.
+-e .[train]
+

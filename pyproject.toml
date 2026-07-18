@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crashdiag"
+version = "0.2.0"
+description = "Mechanically verified infrastructure-diagnosis RL environment"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "CrashDiag contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+train = [
+  "accelerate>=1.10,<2",
+  "datasets>=4,<5",
+  "peft>=0.18,<1",
+  "torch>=2.6",
+  "transformers>=5.2,<6",
+  "trl>=1.8,<2",
+]
+
+[project.scripts]
+crashdiag-generate = "training.generate_dataset:main"
+crashdiag-sft = "training.sft:main"
+crashdiag-grpo = "training.grpo:main"
+crashdiag-evaluate = "training.evaluate:main"
+
+[tool.setuptools.packages.find]
+include = ["crashdiag*", "training*"]
