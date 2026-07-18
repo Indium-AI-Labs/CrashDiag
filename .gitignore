@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+artifacts/
+outputs/
+wandb/
+.venv/
+.env
+/roadmap.md
