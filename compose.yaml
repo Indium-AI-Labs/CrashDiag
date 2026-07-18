@@ -1,0 +1,30 @@
+services:
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crashdiag-sandbox:local
+    environment:
+      CRASHDIAG_SANDBOX_HOST: "0.0.0.0"
+      CRASHDIAG_SANDBOX_PORT: "8765"
+      CRASHDIAG_SANDBOX_TOKEN: "${CRASHDIAG_SANDBOX_TOKEN:?Set CRASHDIAG_SANDBOX_TOKEN to a non-empty random value}"
+      CRASHDIAG_MAX_SESSIONS: "${CRASHDIAG_MAX_SESSIONS:-128}"
+      CRASHDIAG_SESSION_TTL_SECONDS: "${CRASHDIAG_SESSION_TTL_SECONDS:-900}"
+      CRASHDIAG_MAX_OPERATIONS_PER_SESSION: "${CRASHDIAG_MAX_OPERATIONS_PER_SESSION:-64}"
+      CRASHDIAG_MAX_WORKERS: "${CRASHDIAG_MAX_WORKERS:-64}"
+      CRASHDIAG_REQUEST_TIMEOUT_SECONDS: "${CRASHDIAG_REQUEST_TIMEOUT_SECONDS:-10}"
+      CRASHDIAG_LOG_LEVEL: "${CRASHDIAG_LOG_LEVEL:-INFO}"
+    ports:
+      - "${CRASHDIAG_SANDBOX_BIND_ADDRESS:-127.0.0.1}:${CRASHDIAG_SANDBOX_PUBLISHED_PORT:-8765}:8765"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0

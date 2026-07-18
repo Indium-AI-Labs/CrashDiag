@@ -22,6 +22,7 @@ train = [
 ]
 
 [project.scripts]
+crashdiag-sandbox = "crashdiag.sandbox_server:main"
 crashdiag-generate = "training.generate_dataset:main"
 crashdiag-sft = "training.sft:main"
 crashdiag-grpo = "training.grpo:main"
