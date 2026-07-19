@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOKS = {
     "sft": ROOT / "notebooks" / "sft.ipynb",
     "grpo": ROOT / "notebooks" / "grpo.ipynb",
+    "eval": ROOT / "notebooks" / "eval.ipynb",
 }
 
 
@@ -120,10 +121,13 @@ class NotebookWorkflowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         sft_notebook = _load(NOTEBOOKS["sft"])
         grpo_notebook = _load(NOTEBOOKS["grpo"])
+        eval_notebook = _load(NOTEBOOKS["eval"])
         cls.sft = _source(sft_notebook)
         cls.grpo = _source(grpo_notebook)
+        cls.eval = _source(eval_notebook)
         cls.sft_code = _code_source(sft_notebook)
         cls.grpo_code = _code_source(grpo_notebook)
+        cls.eval_code = _code_source(eval_notebook)
 
     def test_sft_notebook_downloads_verified_bucket_data_before_training(self) -> None:
         required = (
@@ -209,8 +213,47 @@ class NotebookWorkflowTests(unittest.TestCase):
             self.grpo.index('REPO_DIR / "outputs/evaluation-report"'),
         )
 
+    def test_eval_notebook_scores_exact_answer_free_dataset_and_uploads(self) -> None:
+        required = (
+            'BUCKET_ID = "devaanshpa/CrashDiag"',
+            'SANDBOX_URL = "https://sandbox.devaanshpathak.com"',
+            'EVALUATION_STAGE = "sft-eval"',
+            'DATASET_DIR / "grpo_eval.jsonl"',
+            'SFT_DIR / "adapter_model.safetensors"',
+            'required_secret("HF_TOKEN")',
+            'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
+            'download_run(RUN_DIR, allow_incomplete=True)',
+            'verify_local_run(RUN_DIR, require_complete=False)',
+            'artifact_commit != CURRENT_COMMIT',
+            'AutoPeftModelForCausalLM.from_pretrained(',
+            'configure_reward_backend(',
+            'mechanical_reward(',
+            'prompts=[row["prompt"]]',
+            'sample_seed=[row["sample_seed"]]',
+            '"backend_error": bool(extra["crashdiag_backend_error"][0])',
+            '"resolved": bool(extra["crashdiag_resolved"][0])',
+            'generate_evaluation_report(',
+            'uploader.upload_files(',
+            'display(SVG(filename=str(chart)))',
+            'manifest_sha256',
+        )
+        for marker in required:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.eval)
+        self.assertNotIn("grpo_main", self.eval)
+        self.assertNotIn("sft_main", self.eval)
+        self.assertNotIn("uploader.complete_run", self.eval)
+        self.assertLess(
+            self.eval.index('EVAL_FILE = DATASET_DIR / "grpo_eval.jsonl"'),
+            self.eval.index("mechanical_reward("),
+        )
+        self.assertLess(
+            self.eval.index("mechanical_reward("),
+            self.eval.index("uploader.upload_files("),
+        )
+
     def test_inter_notebook_contract_is_bucket_and_run_id_not_local_state(self) -> None:
-        for source in (self.sft, self.grpo):
+        for source in (self.sft, self.grpo, self.eval):
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
             self.assertIn('REPO_DIR = Path("/kaggle/working/CrashDiag")', source)
             self.assertIn("CRASHDIAG_ARTIFACT_UPLOAD_POLICY", source)
@@ -219,7 +262,11 @@ class NotebookWorkflowTests(unittest.TestCase):
         self.assertNotIn("outputs/sft\"),\n    \"--train-file", self.grpo)
 
     def test_notebooks_remove_unused_torchao_before_training_install(self) -> None:
-        for workflow, source in (("sft", self.sft), ("grpo", self.grpo)):
+        for workflow, source in (
+            ("sft", self.sft),
+            ("grpo", self.grpo),
+            ("eval", self.eval),
+        ):
             with self.subTest(workflow=workflow):
                 probe = '[sys.executable, "-m", "pip", "show", "torchao"]'
                 uninstall = (
