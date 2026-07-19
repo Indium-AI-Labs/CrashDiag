@@ -142,6 +142,11 @@ class NotebookWorkflowTests(unittest.TestCase):
             '\"--dataset\", str(DATASET_DIR / \"sft_train.jsonl\")',
             '\"--eval-dataset\", str(DATASET_DIR / \"sft_eval.jsonl\")',
             "outputs/sft",
+            "from IPython.display import SVG, display",
+            "SFT_REPORT_DIR",
+            "metrics_summary.json",
+            "display(SVG(filename=str(chart)))",
+            "expected_reports - manifest_paths",
             "sft/_SUCCESS.json",
             "crashdiag_handoff.txt",
             "SOURCE_COMMIT",
@@ -154,6 +159,10 @@ class NotebookWorkflowTests(unittest.TestCase):
         self.assertNotIn("uploader.start_run", self.sft)
         self.assertNotIn('"data/sft_train.jsonl"', self.sft)
         self.assertLess(self.sft.index("download_run"), self.sft.index("sft_main"))
+        self.assertLess(
+            self.sft.index("sft_main(["),
+            self.sft.index("display(SVG(filename=str(chart)))"),
+        )
 
     def test_grpo_notebook_restores_verified_sft_and_uses_real_sandbox(self) -> None:
         required = (
@@ -171,14 +180,29 @@ class NotebookWorkflowTests(unittest.TestCase):
             "DATASET_DIR / \"grpo_train.jsonl\"",
             "HttpSandbox",
             "grpo_main",
+            "from IPython.display import SVG, display",
+            "GRPO_REPORT_DIR",
+            "metrics_summary.json",
+            "display(SVG(filename=str(chart)))",
+            "expected - manifest_paths",
             "--eval-file\", \"\"",
             "GRPO_STAGE = \"grpo-smoke\" if MODE == \"smoke\" else \"grpo\"",
             "evaluate_main",
+            "outputs/evaluation-report",
+            "mechanical_evaluation_summary.json",
             "uploader.complete_run",
         )
         for marker in required:
             with self.subTest(marker=marker):
                 self.assertIn(marker, self.grpo)
+        self.assertLess(
+            self.grpo.index("grpo_main(grpo_args)"),
+            self.grpo.index("display_signed_report(\n    GRPO_REPORT_DIR"),
+        )
+        self.assertLess(
+            self.grpo.index("evaluate_main(["),
+            self.grpo.index('REPO_DIR / "outputs/evaluation-report"'),
+        )
 
     def test_inter_notebook_contract_is_bucket_and_run_id_not_local_state(self) -> None:
         for source in (self.sft, self.grpo):
