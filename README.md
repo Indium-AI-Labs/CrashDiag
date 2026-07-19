@@ -59,6 +59,40 @@ PASS: BadEnvVar resolved mechanically
 
 ## Training setup
 
+### Recommended: independent Kaggle notebooks
+
+The primary GPU workflow is split across two self-contained Kaggle notebooks:
+
+1. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
+   enable Internet and a GPU, and attach only the `HF_TOKEN` Kaggle Secret. Run
+   every cell, then record the exact `RUN_ID` and `SOURCE_COMMIT` printed at
+   the end.
+2. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
+   session, enable Internet and a GPU, and attach `HF_TOKEN` plus
+   `CRASHDIAG_SANDBOX_TOKEN`. Paste the SFT notebook's exact `RUN_ID` and
+   `SOURCE_COMMIT`, start in smoke mode, and proceed to the full run only after
+   checking its rewards and backend-error logs.
+
+Each notebook clones and installs the repository, loads its own secrets, checks
+its dependencies, and can run without the other notebook's kernel or
+`/kaggle/working` files. Their only handoff is the private
+`devaanshpa/CrashDiag` Storage Bucket plus the exact `RUN_ID` and
+`SOURCE_COMMIT`: the SFT notebook uploads hash-manifested datasets and a
+success-marked SFT adapter, while the GRPO notebook checks out the same source
+revision, downloads the artifacts, and verifies their hashes and recorded
+commit. GRPO refuses to continue when the datasets or SFT success marker are
+missing and never silently falls back to the untrained base model. It then
+probes the authenticated sandbox at `https://sandbox.devaanshpathak.com`
+before loading model weights.
+
+The notebooks are the operational entry points, while `training/*.py` remains
+the reusable, tested implementation backend used by both notebooks and the
+optional command-line workflows below. This keeps trainer, artifact, reward,
+and evaluation behavior in one implementation instead of duplicating it in
+notebook-only code.
+
+### Local or direct-CLI environment
+
 For GPU training, use a fresh Python 3.11 or 3.12 environment and install the
 PyTorch build appropriate for the server's CUDA/ROCm platform. Then install the
 project's training extra:
@@ -74,7 +108,7 @@ accelerate config
 On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`; the
 remaining Python commands are unchanged.
 
-The scripts target the current conversational dataset APIs in
+The training backend targets the current conversational dataset APIs in
 [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer) and
 [TRL GRPOTrainer](https://huggingface.co/docs/trl/grpo_trainer). Heavy ML
 libraries are imported only when a training or local-evaluation run starts, so
@@ -93,24 +127,17 @@ CRASHDIAG_ARTIFACT_UPLOAD_POLICY=required
 CRASHDIAG_RUN_ID=20260719T120000Z-experiment
 ```
 
-Environment variables override `.env`, which is how Kaggle Secrets should be
-injected. `scripts/train.sh` generates one unique `CRASHDIAG_RUN_ID` when it is
-not already set. Direct phase commands require a run ID whenever bucket upload
-is enabled; pass `--artifact-upload-policy disabled` for an intentional
-local-only run.
+Environment variables override `.env`. The SFT notebook reads only the
+`HF_TOKEN` Kaggle Secret; the GRPO notebook independently reads `HF_TOKEN` and
+`CRASHDIAG_SANDBOX_TOKEN`. Neither notebook displays a secret or persists it to
+`/kaggle/working`. For direct CLI automation, `scripts/train.sh` generates one
+unique `CRASHDIAG_RUN_ID` when it is not already set. Direct phase commands
+require a run ID whenever bucket upload is enabled; pass
+`--artifact-upload-policy disabled` for an intentional local-only run.
 
-Inside Kaggle, attach Secrets named `HF_TOKEN` and
-`CRASHDIAG_SANDBOX_TOKEN`, enable Internet, then launch without persisting
-either credential into `/kaggle/working`:
-
-```bash
-python -m training.kaggle --sandbox-url https://sandbox.example.com
-```
-
-The launcher injects both secrets only into the training subprocess tree and
-defaults to the `devaanshpa/CrashDiag` bucket.
-
-Before using GPU time, verify authenticated write access:
+The notebooks perform their corresponding preflights automatically. For an
+optional direct CLI run, verify authenticated write access before using GPU
+time:
 
 ```bash
 python -m training.artifacts preflight
@@ -135,8 +162,17 @@ a later download-and-upload step. See the official
 [Storage Bucket guide](https://huggingface.co/docs/huggingface_hub/en/guides/buckets).
 For checkpoint recovery only, `--allow-incomplete` permits downloading a
 partial prefix; it does not relax the default used for later promotion.
+Completed stages are manifest-verified. Individual partial checkpoints do not
+yet carry their own success manifest, so notebook auto-resume is off by default
+and partial recovery should be inspected before opting in.
 
-### 1. Generate datasets
+### Optional direct CLI and automation
+
+The following commands expose the same tested backend used by the notebooks.
+They are useful for local development, CI, custom launchers, or non-Kaggle GPU
+hosts; they are not required to use the recommended Kaggle workflow.
+
+#### Generate datasets
 
 ```bash
 python -m training.generate_dataset \
@@ -156,7 +192,7 @@ The included files were generated with those defaults. Each SFT target was
 executed against a fresh sandbox before it was written. Regeneration with the
 same arguments is byte-deterministic.
 
-### 2. Supervised fine-tuning
+#### Supervised fine-tuning
 
 ```bash
 accelerate launch --module training.sft \
@@ -172,7 +208,7 @@ automatic BF16/FP16 selection, and gradient checkpointing. Run
 packing, step/epoch saves, checkpoint-resume, and model overrides. Bucket
 uploads at each save make preemption recovery practical on ephemeral GPU hosts.
 
-### 3. Mechanically rewarded GRPO
+#### Mechanically rewarded GRPO
 
 Fast local sandbox rollouts:
 
@@ -201,7 +237,7 @@ and add:
 TRL's vLLM integration supports colocated and server modes; see the
 [vLLM TRL guide](https://docs.vllm.ai/en/latest/training/trl/).
 
-### 4. Evaluate the trained policy
+#### Evaluate the trained policy
 
 Local weights or adapter:
 
@@ -225,7 +261,7 @@ Both modes execute one parsed sandbox action per episode and report mechanical
 overall/per-fault success rates plus complete trajectories. Repetitions use
 distinct deterministic held-out scenario seeds instead of repeating one prompt.
 
-### One-command Linux run
+#### One-command Linux runner
 
 After installing the training dependencies and running `accelerate config`:
 
@@ -306,21 +342,21 @@ Docker port. Point a DNS name at the Vultr VPS, allow edge-firewall ingress on
 
 ```dotenv
 CRASHDIAG_SANDBOX_TOKEN=<random-64-hex-value>
-CRASHDIAG_SANDBOX_DOMAIN=sandbox.example.com
+CRASHDIAG_SANDBOX_DOMAIN=sandbox.devaanshpathak.com
 ```
 
 Start the sandbox plus the included Caddy TLS proxy:
 
 ```bash
 docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
-curl --fail https://sandbox.example.com/healthz
+curl --fail https://sandbox.devaanshpathak.com/healthz
 ```
 
-Store that sandbox token as a separate Kaggle Secret and set
-`CRASHDIAG_SANDBOX_URL=https://sandbox.example.com` in the notebook process.
-Do not copy `HF_TOKEN` to Vultr. The base sandbox port remains bound to host
-loopback; Caddy accesses it over the private Compose network and obtains TLS
-certificates automatically.
+Store that sandbox token as the `CRASHDIAG_SANDBOX_TOKEN` Kaggle Secret. The
+GRPO notebook is configured for `https://sandbox.devaanshpathak.com`; the SFT
+notebook does not need this token or service. Do not copy `HF_TOKEN` to Vultr.
+The base sandbox port remains bound to host loopback; Caddy accesses it over the
+private Compose network and obtains TLS certificates automatically.
 
 ## Faults and actions
 
@@ -337,17 +373,27 @@ certificates automatically.
 
 ## Repository layout
 
+- `notebooks/sft.ipynb`: primary independent Kaggle dataset-generation and LoRA
+  SFT workflow; requires only the `HF_TOKEN` Kaggle Secret.
+- `notebooks/grpo.ipynb`: primary independent Kaggle GRPO and mechanical
+  evaluation workflow; restores the exact SFT run and uses the authenticated
+  Vultr sandbox.
 - `crashdiag/`: core environment, agents, verifier, and sandbox backends.
 - `training/generate_dataset.py`: deterministic dataset construction.
-- `training/sft.py`: LoRA supervised fine-tuning.
-- `training/grpo.py`: state-executing GRPO reward and trainer.
-- `training/evaluate.py`: local/endpoint mechanical evaluation.
-- `training/kaggle.py`: Kaggle Secrets launcher for the complete or phased job.
+- `training/sft.py`: reusable, tested LoRA SFT backend used by the notebook and
+  direct CLI.
+- `training/grpo.py`: reusable, tested state-executing GRPO reward and trainer
+  used by the notebook and direct CLI.
+- `training/evaluate.py`: reusable local/endpoint mechanical evaluation
+  backend.
+- `training/kaggle.py`: optional Kaggle Secrets launcher for automated complete
+  or phased CLI jobs.
 - `training/artifacts.py`: private bucket preflight, checkpoint sync, manifests,
   completion markers, and verified download.
 - `Dockerfile`, `compose.yaml`: remote safe sandbox service.
 - `compose.vultr.yaml`, `deploy/vultr/Caddyfile`: HTTPS exposure for Kaggle.
-- `scripts/train.sh`: end-to-end dataset -> SFT -> GRPO -> evaluation runner.
+- `scripts/train.sh`: optional automated dataset -> SFT -> GRPO -> evaluation
+  runner.
 - `tests/`: dependency-free core, data, reward, evaluator, and HTTP integration
   tests.
 
@@ -365,6 +411,9 @@ Working and verified in this repository:
   checkpoint callbacks, manifests, markers, and verified downloads;
 - a live private-bucket check plus a mechanically validated six-fault dataset
   upload/download/hash-verification integration run;
+- both independent notebooks are structurally and offline validated, including
+  clean code-cell compilation, secret-safety checks, and their bucket,
+  `RUN_ID`, and `SOURCE_COMMIT` handoff contract;
 - no LLM grading anywhere in the reward path.
 
 Not run in this pass:
@@ -372,8 +421,9 @@ Not run in this pass:
 - a full SFT or GRPO optimization job, because model weights and the GPU
   training stack are not installed in this local environment;
 - a live vLLM inference/training process.
-- a full Kaggle GPU run or live Vultr HTTPS deployment from this development
-  machine.
+- either notebook end-to-end on a Kaggle GPU; their current validation is
+  structural and offline rather than a completed training claim;
+- a live Vultr HTTPS deployment from this development machine.
 
 Still stubbed/future work:
 
