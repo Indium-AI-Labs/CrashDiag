@@ -19,6 +19,9 @@ health check, never from an LLM grader or a prose rubric.
 - Local-weight, PEFT-adapter, or vLLM-endpoint evaluation.
 - An isolated HTTP sandbox service, stdlib client, hardened Dockerfile, and
   Compose deployment.
+- Private Hugging Face Storage Bucket persistence for datasets, every retained
+  checkpoint, final adapters, tokenizer/state/metrics, evaluation reports, and
+  pipeline logs.
 
 ## Mechanical verification guarantee
 
@@ -77,6 +80,62 @@ The scripts target the current conversational dataset APIs in
 libraries are imported only when a training or local-evaluation run starts, so
 dataset generation and reward tests remain lightweight.
 
+### Private artifact bucket
+
+Training artifacts are stored in the private Hugging Face Storage Bucket
+`devaanshpa/CrashDiag`. Copy `.env.example` to the gitignored `.env` and set a
+fine-grained write token; never pass the token as a CLI flag:
+
+```dotenv
+HF_TOKEN=hf_...
+CRASHDIAG_HF_BUCKET_ID=devaanshpa/CrashDiag
+CRASHDIAG_ARTIFACT_UPLOAD_POLICY=required
+CRASHDIAG_RUN_ID=20260719T120000Z-experiment
+```
+
+Environment variables override `.env`, which is how Kaggle Secrets should be
+injected. `scripts/train.sh` generates one unique `CRASHDIAG_RUN_ID` when it is
+not already set. Direct phase commands require a run ID whenever bucket upload
+is enabled; pass `--artifact-upload-policy disabled` for an intentional
+local-only run.
+
+Inside Kaggle, attach Secrets named `HF_TOKEN` and
+`CRASHDIAG_SANDBOX_TOKEN`, enable Internet, then launch without persisting
+either credential into `/kaggle/working`:
+
+```bash
+python -m training.kaggle --sandbox-url https://sandbox.example.com
+```
+
+The launcher injects both secrets only into the training subprocess tree and
+defaults to the `devaanshpa/CrashDiag` bucket.
+
+Before using GPU time, verify authenticated write access:
+
+```bash
+python -m training.artifacts preflight
+```
+
+The client checks that the bucket is private before every write and refuses an
+existing public bucket. Set `CRASHDIAG_CREATE_ARTIFACT_BUCKET=true` only if the
+first preflight should create a missing private bucket. Stage payloads are
+uploaded before SHA-256 manifests and `_SUCCESS.json`; checkpoint callbacks
+incrementally sync from rank zero after every Trainer save.
+
+Download a completed run for later promotion to model and dataset repos:
+
+```bash
+python -m training.artifacts download --destination downloaded-run
+```
+
+The downloader requires a run-level success marker, an empty destination, and
+validates every manifest hash. Hugging Face does not currently provide a
+server-side bucket-to-repository promotion, so model/dataset repo publishing is
+a later download-and-upload step. See the official
+[Storage Bucket guide](https://huggingface.co/docs/huggingface_hub/en/guides/buckets).
+For checkpoint recovery only, `--allow-incomplete` permits downloading a
+partial prefix; it does not relax the default used for later promotion.
+
 ### 1. Generate datasets
 
 ```bash
@@ -110,7 +169,8 @@ accelerate launch --module training.sft \
 Defaults use LoRA rank 16, alpha 32, all linear layers, completion-only loss,
 automatic BF16/FP16 selection, and gradient checkpointing. Run
 `python -m training.sft --help` for batch size, accumulation, precision,
-packing, checkpoint-resume, and model overrides.
+packing, step/epoch saves, checkpoint-resume, and model overrides. Bucket
+uploads at each save make preemption recovery practical on ephemeral GPU hosts.
 
 ### 3. Mechanically rewarded GRPO
 
@@ -174,7 +234,10 @@ bash scripts/train.sh
 ```
 
 Override `BASE_MODEL`, `NUM_PROCESSES`, `TRAIN_SAMPLES_PER_FAULT`, or
-`EVAL_SAMPLES_PER_FAULT` through environment variables.
+`EVAL_SAMPLES_PER_FAULT` through environment variables. This runner defaults to
+required artifact persistence, captures each phase's logs, and writes a
+run-level success marker only after datasets, SFT, GRPO, evaluation, and logs
+have all completed.
 
 ## Run the sandbox service with Docker Compose
 
@@ -235,6 +298,30 @@ Stop the service with `docker compose down`.
 The image runs as UID/GID `10001`, drops all capabilities, has a read-only root
 filesystem, sets `no-new-privileges`, and does not mount the Docker socket.
 
+### Vultr sandbox for Kaggle
+
+Kaggle should reach the long-lived Vultr sandbox over HTTPS, not a public
+Docker port. Point a DNS name at the Vultr VPS, allow edge-firewall ingress on
+80/443, keep 8765 closed, and add the domain to the Vultr host's `.env`:
+
+```dotenv
+CRASHDIAG_SANDBOX_TOKEN=<random-64-hex-value>
+CRASHDIAG_SANDBOX_DOMAIN=sandbox.example.com
+```
+
+Start the sandbox plus the included Caddy TLS proxy:
+
+```bash
+docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
+curl --fail https://sandbox.example.com/healthz
+```
+
+Store that sandbox token as a separate Kaggle Secret and set
+`CRASHDIAG_SANDBOX_URL=https://sandbox.example.com` in the notebook process.
+Do not copy `HF_TOKEN` to Vultr. The base sandbox port remains bound to host
+loopback; Caddy accesses it over the private Compose network and obtains TLS
+certificates automatically.
+
 ## Faults and actions
 
 | Fault | Difficulty | Mechanical failure | Recovery action |
@@ -255,8 +342,12 @@ filesystem, sets `no-new-privileges`, and does not mount the Docker socket.
 - `training/sft.py`: LoRA supervised fine-tuning.
 - `training/grpo.py`: state-executing GRPO reward and trainer.
 - `training/evaluate.py`: local/endpoint mechanical evaluation.
+- `training/kaggle.py`: Kaggle Secrets launcher for the complete or phased job.
+- `training/artifacts.py`: private bucket preflight, checkpoint sync, manifests,
+  completion markers, and verified download.
 - `Dockerfile`, `compose.yaml`: remote safe sandbox service.
-- `scripts/train.sh`: end-to-end dataset → SFT → GRPO → evaluation runner.
+- `compose.vultr.yaml`, `deploy/vultr/Caddyfile`: HTTPS exposure for Kaggle.
+- `scripts/train.sh`: end-to-end dataset -> SFT -> GRPO -> evaluation runner.
 - `tests/`: dependency-free core, data, reward, evaluator, and HTTP integration
   tests.
 
@@ -270,6 +361,10 @@ Working and verified in this repository:
 - package installation and all command-line entry points;
 - Docker build, non-root execution, Compose health, authentication, session
   isolation, capacity, TTL, and allowlist rejection;
+- offline-tested private-bucket privacy checks, exact artifact mappings,
+  checkpoint callbacks, manifests, markers, and verified downloads;
+- a live private-bucket check plus a mechanically validated six-fault dataset
+  upload/download/hash-verification integration run;
 - no LLM grading anywhere in the reward path.
 
 Not run in this pass:
@@ -277,6 +372,8 @@ Not run in this pass:
 - a full SFT or GRPO optimization job, because model weights and the GPU
   training stack are not installed in this local environment;
 - a live vLLM inference/training process.
+- a full Kaggle GPU run or live Vultr HTTPS deployment from this development
+  machine.
 
 Still stubbed/future work:
 
