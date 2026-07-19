@@ -242,6 +242,42 @@ class HttpSandbox(SandboxBackend):
             raise SandboxTransportError("fault response has no observation object")
         return observation
 
+    def prepare_hard_scenario(
+        self,
+        fault_name: str,
+        sample_seed: int,
+        scenario_profile: str,
+    ) -> dict[str, Any]:
+        """Prepare schema-v2 state in one authenticated setup request.
+
+        The policy action and post-action verification remain separate live
+        requests. This only collapses latency-bound setup mutations.
+        """
+
+        try:
+            result = self._request(
+                "POST",
+                f"{self._current_session_path()}/scenarios/hard",
+                {
+                    "fault_name": fault_name,
+                    "sample_seed": sample_seed,
+                    "scenario_profile": scenario_profile,
+                },
+            )
+        except SandboxHTTPError as exc:
+            if exc.status == 404:
+                raise NotImplementedError(
+                    "remote sandbox does not support atomic hard scenarios"
+                ) from exc
+            raise
+        observation = result.get("observation")
+        health = result.get("health")
+        if not isinstance(observation, dict) or not isinstance(health, dict):
+            raise SandboxTransportError(
+                "hard-scenario response has no observation/health objects"
+            )
+        return result
+
     def service_health(self) -> dict[str, Any]:
         """Query unauthenticated service liveness (independent of session health)."""
 

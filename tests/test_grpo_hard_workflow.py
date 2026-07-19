@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from training.calibrate_grpo import select_calibration_rows, summarize_temperature
+from training.calibrate_grpo import calibrate, select_calibration_rows, summarize_temperature
 from training.common import FAULT_NAMES
 from training.evaluate_jsonl import summarize_results
 from training.grpo_gates import promotion_gate, smoke_gate
@@ -47,6 +50,44 @@ class CalibrationTests(unittest.TestCase):
         result = summarize_temperature(rollouts, expected_group_size=8)
         self.assertTrue(result["passed"])
         self.assertEqual(len(result["mixed_fault_families"]), 4)
+
+    def test_calibration_scores_each_generation_concurrently(self) -> None:
+        rows = generate_hard_records(
+            samples_per_fault=6, seed=31, start_variation=0, split="train"
+        )
+        lock = threading.Lock()
+        active = 0
+        maximum_active = 0
+
+        def fake_reward(completions, *, log_extra, **kwargs):
+            nonlocal active, maximum_active
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(0.002)
+            with lock:
+                active -= 1
+            reward = 1.0 if completions[0] == "good" else 0.0
+            log_extra("crashdiag_action", ["restart_app"])
+            log_extra("crashdiag_resolved", [reward == 1.0])
+            log_extra("crashdiag_backend_error", [False])
+            log_extra("crashdiag_strict_json", [True])
+            return [reward]
+
+        messages: list[str] = []
+        with patch("training.calibrate_grpo.mechanical_reward", side_effect=fake_reward):
+            report, _ = calibrate(
+                rows,
+                lambda prompt, temperature, count: ["good", "bad"],
+                temperatures=[0.9],
+                num_generations=2,
+                prompts_per_fault_profile=1,
+                reward_workers=2,
+                progress=messages.append,
+            )
+        self.assertTrue(report["passed"])
+        self.assertEqual(maximum_active, 2)
+        self.assertTrue(any("18/18 prompt groups" in message for message in messages))
 
 
 class EvaluationAndGateTests(unittest.TestCase):

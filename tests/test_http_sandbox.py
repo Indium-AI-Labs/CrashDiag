@@ -200,6 +200,7 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
             self.assertIn(2, payload["scenario_schema_versions"])
+            self.assertTrue(payload["hard_scenario_batch"])
 
             with self.assertRaises(SandboxHTTPError) as missing:
                 HttpSandbox(base_url)

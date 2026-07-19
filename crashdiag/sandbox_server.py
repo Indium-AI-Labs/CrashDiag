@@ -17,6 +17,7 @@ API (all request and response bodies are JSON):
 * ``POST /v1/sessions/{id}/actions/{name}`` -- execute an allowlisted action.
 * ``POST /v1/sessions/{id}/mutations/{name}`` -- apply an allowlisted mutation.
 * ``POST /v1/sessions/{id}/faults/{name}`` -- inject a built-in fault by name.
+* ``POST /v1/sessions/{id}/scenarios/hard`` -- atomically prepare schema v2.
 
 When configured, the bearer token protects every endpoint except ``/healthz``.
 Sessions are bounded by count and an idle TTL and are also isolated by per-session
@@ -297,6 +298,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                         "status": "ok",
                         "service": "crashdiag-sandbox",
                         "scenario_schema_versions": [1, 2],
+                        "hard_scenario_batch": True,
                         "sessions": self.sandbox_server.sessions.stats(),
                     },
                 )
@@ -387,6 +389,66 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
             self._write_json(
                 HTTPStatus.OK,
                 {"reset": True, "session_id": session_id, "observation": sandbox.observe()},
+            )
+            return
+
+        if len(segments) == 5 and segments[3:] == ["scenarios", "hard"]:
+            if method != "POST":
+                raise APIError(405, "method_not_allowed", "method not allowed")
+            payload = self._read_json_object()
+            expected = {"fault_name", "sample_seed", "scenario_profile"}
+            if set(payload) != expected:
+                raise APIError(
+                    400,
+                    "invalid_request",
+                    "hard scenario requires fault_name, sample_seed, and scenario_profile",
+                )
+            fault_name = payload["fault_name"]
+            scenario_seed = payload["sample_seed"]
+            scenario_profile = payload["scenario_profile"]
+            if not isinstance(fault_name, str) or fault_name not in _FAULTS:
+                raise APIError(400, "invalid_request", "unknown hard-scenario fault")
+            if (
+                isinstance(scenario_seed, bool)
+                or not isinstance(scenario_seed, int)
+                or scenario_seed < 0
+                or scenario_seed >= 1 << 63
+            ):
+                raise APIError(
+                    400,
+                    "invalid_request",
+                    "sample_seed must be a non-negative signed int64",
+                )
+            # Lazy import keeps liveness and schema-v1 paths independent of the
+            # training package copied into the sandbox image.
+            from training.hard_scenarios import (
+                HARD_SCENARIO_PROFILES,
+                HARD_SCENARIO_SCHEMA_VERSION,
+                prepare_hard_scenario,
+            )
+
+            if scenario_profile not in HARD_SCENARIO_PROFILES:
+                raise APIError(400, "invalid_request", "unknown hard-scenario profile")
+            with self.sandbox_server.sessions.lease(
+                session_id, count_operation=True
+            ) as session:
+                prepare_hard_scenario(
+                    fault_name,
+                    scenario_seed,
+                    scenario_profile,
+                    sandbox=session.sandbox,
+                )
+                observation = session.sandbox.observe()
+                health = session.sandbox.health_check()
+            self._write_json(
+                HTTPStatus.OK,
+                {
+                    "fault": fault_name,
+                    "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+                    "scenario_profile": scenario_profile,
+                    "observation": observation,
+                    "health": health,
+                },
             )
             return
 

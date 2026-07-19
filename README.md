@@ -86,8 +86,11 @@ python -m training.generate_grpo_hard \
 
 The defaults write and upload 768 `grpo_hard_train.jsonl` rows and 192
 `grpo_hard_eval.jsonl` rows to a fresh private-bucket run. Copy the printed
-`GRPO_RUN_ID` and full `SOURCE_COMMIT` into
-[`notebooks/grpo_hard.ipynb`](notebooks/grpo_hard.ipynb).
+`GRPO_RUN_ID` and full dataset `SOURCE_COMMIT` into
+[`notebooks/grpo_hard.ipynb`](notebooks/grpo_hard.ipynb), and set
+`TRAINER_COMMIT` to the published notebook/trainer revision. Keeping these two
+SHAs separate lets a performance-only trainer fix consume an already signed,
+unchanged dataset without weakening dataset provenance.
 
 Before running the notebook, update the Vultr checkout because schema-v2 uses
 new setup-only sandbox mutations and advertises supported scenario versions:
@@ -99,13 +102,16 @@ docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
 curl --fail https://sandbox.devaanshpathak.com/healthz
 ```
 
-The health response must contain `"scenario_schema_versions":[1,2]`. The hard
-notebook then performs, in order:
+The health response must contain `"scenario_schema_versions":[1,2]` and
+`"hard_scenario_batch":true`. The latter prepares all deterministic setup state
+inside one authenticated request instead of dozens of HTTPS mutations. The
+hard notebook then performs, in order:
 
 1. signed download of the hard data, the exact parent SFT adapter, and the
    original schema-v1 evaluation file;
-2. 8-generation calibration at temperatures `0.9`, `1.2`, then `1.5`, stopping
-   at the first setting with usable mechanically measured reward variance;
+2. 8-generation calibration at temperatures `0.9`, `1.2`, then `1.5`, with
+   eight concurrent isolated reward workers and visible per-group progress,
+   stopping at the first setting with usable mechanically measured variance;
 3. a 36-step smoke job that must show positive reward standard deviation,
    positive gradient norm, mixed success, zero backend errors, finite metrics,
    and an adapter SHA different from the parent;

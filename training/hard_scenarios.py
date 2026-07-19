@@ -240,6 +240,22 @@ def prepare_hard_scenario(
     fault = fault_for_name(fault_name)
     rng = random.Random(scenario_seed)
     target = sandbox if sandbox is not None else MockSandbox()
+    native_prepare = getattr(target, "prepare_hard_scenario", None)
+    if callable(native_prepare):
+        try:
+            prepared = native_prepare(fault_name, scenario_seed, profile)
+        except NotImplementedError:
+            # Older/alternate backends retain the portable sequence below.
+            pass
+        else:
+            if not isinstance(prepared, Mapping):
+                raise TypeError("native hard-scenario preparation must return a mapping")
+            health = prepared.get("health")
+            if not isinstance(health, Mapping) or health.get("healthy") is not False:
+                raise RuntimeError(
+                    f"native hard scenario {fault_name!r} did not become unhealthy"
+                )
+            return fault, target, rng
     _configure_baseline(target, rng, profile)
     _prepare_background(target, rng)
     if profile in {"noisy", "shifted_noisy"}:

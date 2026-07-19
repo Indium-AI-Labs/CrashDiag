@@ -15,6 +15,10 @@ RUN groupadd --system --gid 10001 crashdiag \
        --home-dir /nonexistent --shell /usr/sbin/nologin crashdiag
 
 COPY --chown=crashdiag:crashdiag crashdiag/ ./crashdiag/
+# The authenticated schema-v2 batch endpoint reuses the exact deterministic
+# builder used during dataset generation. These modules have no third-party
+# runtime dependencies.
+COPY --chown=crashdiag:crashdiag training/ ./training/
 
 USER 10001:10001
 

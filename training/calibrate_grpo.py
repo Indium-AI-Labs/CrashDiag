@@ -8,6 +8,7 @@ import math
 import os
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +181,8 @@ def calibrate(
     temperatures: Sequence[float] = DEFAULT_TEMPERATURES,
     num_generations: int = 8,
     prompts_per_fault_profile: int = 2,
+    reward_workers: int = 8,
+    progress: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Escalate sampling temperature until reward variance gates pass."""
 
@@ -190,59 +193,90 @@ def calibrate(
     attempts: list[dict[str, Any]] = []
     all_rollouts: list[dict[str, Any]] = []
     selected_temperature: float | None = None
-    for temperature in temperatures:
-        temperature_rollouts: list[dict[str, Any]] = []
-        for prompt_index, row in enumerate(selected):
-            completions = list(generate_group(row["prompt"], float(temperature), num_generations))
-            if len(completions) != num_generations:
-                raise RuntimeError("model returned an unexpected calibration group size")
-            extras: dict[str, list[Any]] = {}
-
-            def log_extra(name: str, values: list[Any]) -> None:
-                extras[name] = list(values)
-
-            rewards = mechanical_reward(
-                completions,
-                fault_name=[row["fault_name"]],
-                sample_seed=[row["sample_seed"]],
-                prompts=[row["prompt"]],
-                scenario_schema_version=[row["scenario_schema_version"]],
-                scenario_profile=[row["scenario_profile"]],
-                log_extra=log_extra,
-            )
-            for generation_index, (completion, reward) in enumerate(zip(completions, rewards, strict=True)):
-                temperature_rollouts.append(
-                    {
-                        "temperature": float(temperature),
-                        "prompt_index": prompt_index,
-                        "generation_index": generation_index,
-                        "fault_name": row["fault_name"],
-                        "scenario_profile": row["scenario_profile"],
-                        "sample_seed": row["sample_seed"],
-                        "completion": completion,
-                        "reward": float(reward),
-                        "action": extras["crashdiag_action"][generation_index],
-                        "resolved": bool(extras["crashdiag_resolved"][generation_index]),
-                        "backend_error": bool(extras["crashdiag_backend_error"][generation_index]),
-                        "strict_json": bool(extras["crashdiag_strict_json"][generation_index]),
-                    }
+    if reward_workers < 1:
+        raise ValueError("reward_workers must be positive")
+    with ThreadPoolExecutor(max_workers=reward_workers) as executor:
+        for temperature in temperatures:
+            if progress is not None:
+                progress(
+                    f"calibration temperature={float(temperature):g}: "
+                    f"0/{len(selected)} prompt groups"
                 )
-        summary = summarize_temperature(
-            temperature_rollouts,
-            expected_group_size=num_generations,
-        )
-        summary["temperature"] = float(temperature)
-        attempts.append(summary)
-        all_rollouts.extend(temperature_rollouts)
-        if summary["passed"]:
-            selected_temperature = float(temperature)
-            break
+            temperature_rollouts: list[dict[str, Any]] = []
+            for prompt_index, row in enumerate(selected):
+                completions = list(
+                    generate_group(row["prompt"], float(temperature), num_generations)
+                )
+                if len(completions) != num_generations:
+                    raise RuntimeError("model returned an unexpected calibration group size")
+
+                def score_completion(completion: str) -> dict[str, Any]:
+                    extras: dict[str, list[Any]] = {}
+
+                    def log_extra(name: str, values: list[Any]) -> None:
+                        extras[name] = list(values)
+
+                    reward = mechanical_reward(
+                        [completion],
+                        fault_name=[row["fault_name"]],
+                        sample_seed=[row["sample_seed"]],
+                        prompts=[row["prompt"]],
+                        scenario_schema_version=[row["scenario_schema_version"]],
+                        scenario_profile=[row["scenario_profile"]],
+                        log_extra=log_extra,
+                    )[0]
+                    return {
+                        "reward": float(reward),
+                        "action": extras["crashdiag_action"][0],
+                        "resolved": bool(extras["crashdiag_resolved"][0]),
+                        "backend_error": bool(extras["crashdiag_backend_error"][0]),
+                        "strict_json": bool(extras["crashdiag_strict_json"][0]),
+                    }
+
+                scored = list(executor.map(score_completion, completions))
+                for generation_index, (completion, result) in enumerate(
+                    zip(completions, scored, strict=True)
+                ):
+                    temperature_rollouts.append(
+                        {
+                            "temperature": float(temperature),
+                            "prompt_index": prompt_index,
+                            "generation_index": generation_index,
+                            "fault_name": row["fault_name"],
+                            "scenario_profile": row["scenario_profile"],
+                            "sample_seed": row["sample_seed"],
+                            "completion": completion,
+                            **result,
+                        }
+                    )
+                if progress is not None:
+                    progress(
+                        f"calibration temperature={float(temperature):g}: "
+                        f"{prompt_index + 1}/{len(selected)} prompt groups"
+                    )
+            summary = summarize_temperature(
+                temperature_rollouts,
+                expected_group_size=num_generations,
+            )
+            summary["temperature"] = float(temperature)
+            attempts.append(summary)
+            all_rollouts.extend(temperature_rollouts)
+            if progress is not None:
+                progress(
+                    f"temperature={float(temperature):g} passed={summary['passed']} "
+                    f"reward={summary['mean_reward']:.3f} "
+                    f"mixed_groups={summary['mixed_groups']}/{summary['prompt_groups']}"
+                )
+            if summary["passed"]:
+                selected_temperature = float(temperature)
+                break
     report = {
         "schema_version": 1,
         "scoring": "mechanical_fault_resolution",
         "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
         "num_generations": num_generations,
         "prompts_per_fault_profile": prompts_per_fault_profile,
+        "reward_workers": reward_workers,
         "selected_temperature": selected_temperature,
         "passed": selected_temperature is not None,
         "attempts": attempts,
@@ -258,7 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperatures", type=float, nargs="+", default=list(DEFAULT_TEMPERATURES))
     parser.add_argument("--num-generations", type=int, default=8)
     parser.add_argument("--prompts-per-fault-profile", type=int, default=2)
-    parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument("--reward-workers", type=int, default=8)
+    parser.add_argument("--max-new-tokens", type=int, default=48)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--sandbox-url", default=os.environ.get("CRASHDIAG_SANDBOX_URL", ""))
@@ -276,7 +311,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     preload_env(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.num_generations < 2 or args.prompts_per_fault_profile < 1:
+    if (
+        args.num_generations < 2
+        or args.prompts_per_fault_profile < 1
+        or args.reward_workers < 1
+    ):
         parser.error("calibration requires at least two generations and one prompt per cell")
     if any(not math.isfinite(value) or value <= 0 for value in args.temperatures):
         parser.error("calibration temperatures must be finite and positive")
@@ -320,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             temperatures=args.temperatures,
             num_generations=args.num_generations,
             prompts_per_fault_profile=args.prompts_per_fault_profile,
+            reward_workers=args.reward_workers,
+            progress=print,
         )
         _write_outputs(args.output_dir, report, rollouts)
         if uploader is not None:

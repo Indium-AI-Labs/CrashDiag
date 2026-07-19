@@ -136,6 +136,7 @@ class NotebookWorkflowTests(unittest.TestCase):
     def test_hard_grpo_notebook_enforces_calibration_smoke_and_promotion(self) -> None:
         required = (
             "PASTE_HARD_GRPO_RUN_ID_HERE",
+            "PASTE_TRAINER_COMMIT_HERE",
             "training.generate_grpo_hard",
             'required_secret("HF_TOKEN")',
             'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
@@ -145,9 +146,11 @@ class NotebookWorkflowTests(unittest.TestCase):
             '"parent_sft.json"',
             "read_parent_reference",
             'service.get("scenario_schema_versions"',
+            'service.get("hard_scenario_batch") is not True',
             "calibrate_main",
             '"0.9", "1.2", "1.5"',
             '"--num-generations", str(NUM_GENERATIONS)',
+            '"--reward-workers", "8"',
             '"--require-nonzero-update"',
             '"--minimum-gate-steps", str(SMOKE_STEPS)',
             'smoke_gate.get("passed") is not True',
