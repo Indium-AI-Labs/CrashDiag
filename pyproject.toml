@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crashdiag"
-version = "0.2.0"
+version = "0.3.0"
 description = "Mechanically verified infrastructure-diagnosis RL environment"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,7 +15,9 @@ dependencies = []
 train = [
   "accelerate>=1.10,<2",
   "datasets>=4,<5",
+  "huggingface-hub>=1.5,<2",
   "peft>=0.18,<1",
+  "python-dotenv>=1.0,<2",
   "torch>=2.6",
   "transformers>=5.2,<6",
   "trl>=1.8,<2",

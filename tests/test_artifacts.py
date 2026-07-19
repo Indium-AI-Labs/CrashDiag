@@ -1,0 +1,340 @@
+"""Offline tests for private training-artifact persistence."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import tempfile
+import types
+import unittest
+from dataclasses import asdict
+from pathlib import Path
+from unittest.mock import patch
+
+from training.artifacts import (
+    ArtifactConfig,
+    ArtifactError,
+    ArtifactUploader,
+    artifact_config_from_args,
+    build_parser,
+    load_env_file,
+    make_checkpoint_upload_callback,
+)
+
+
+class _BucketInfo:
+    def __init__(self, private: bool) -> None:
+        self.private = private
+
+
+class _FakeApi:
+    def __init__(self, *, private: bool = True) -> None:
+        self.private = private
+        self.operations: list[tuple[object, ...]] = []
+        self.remote_paths: set[str] = set()
+        self.download_writer = None
+
+    def create_bucket(self, bucket_id: str, **kwargs: object) -> None:
+        self.operations.append(("create", bucket_id, kwargs))
+
+    def bucket_info(self, bucket_id: str) -> _BucketInfo:
+        self.operations.append(("info", bucket_id))
+        return _BucketInfo(self.private)
+
+    def batch_bucket_files(
+        self, bucket_id: str, *, add: list[tuple[str, str]]
+    ) -> None:
+        self.operations.append(("batch", bucket_id, add))
+        self.remote_paths.update(remote for _, remote in add)
+
+    def sync_bucket(self, source: str, destination: str) -> None:
+        self.operations.append(("sync", source, destination))
+        if source.startswith("hf://") and self.download_writer is not None:
+            self.download_writer(Path(destination))
+
+    def list_bucket_tree(
+        self, bucket_id: str, *, prefix: str, recursive: bool
+    ) -> list[object]:
+        self.operations.append(("list", bucket_id, prefix, recursive))
+        return [
+            types.SimpleNamespace(path=path)
+            for path in sorted(self.remote_paths)
+            if path.startswith(prefix)
+        ]
+
+
+def _namespace(**overrides: object) -> argparse.Namespace:
+    values: dict[str, object] = {
+        "artifact_bucket": None,
+        "artifact_prefix": None,
+        "artifact_local_root": None,
+        "run_id": None,
+        "artifact_upload_policy": None,
+        "create_artifact_bucket": None,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+class DotenvAndConfigTests(unittest.TestCase):
+    def test_dotenv_does_not_override_injected_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "HF_TOKEN=from-file\nCRASHDIAG_HF_BUCKET_ID=owner/private\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"HF_TOKEN": "from-runtime"}, clear=True):
+                load_env_file(path)
+                self.assertEqual(os.environ["HF_TOKEN"], "from-runtime")
+                self.assertEqual(
+                    os.environ["CRASHDIAG_HF_BUCKET_ID"], "owner/private"
+                )
+
+    def test_bucket_configuration_implies_required_upload(self) -> None:
+        environment = {
+            "HF_TOKEN": "hf_private_value",
+            "CRASHDIAG_HF_BUCKET_ID": "devaanshpa/CrashDiag",
+            "CRASHDIAG_RUN_ID": "run-123",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = artifact_config_from_args(_namespace())
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.policy, "required")
+        self.assertEqual(config.remote_root, "runs/run-123")
+        self.assertNotIn("hf_private_value", repr(config))
+        self.assertNotIn("hf_private_value", repr(asdict(config)))
+
+    def test_artifact_cli_accepts_settings_after_subcommand(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "preflight",
+                "--artifact-bucket",
+                "devaanshpa/CrashDiag",
+                "--run-id",
+                "run-123",
+            ]
+        )
+        self.assertEqual(args.command, "preflight")
+        self.assertEqual(args.artifact_bucket, "devaanshpa/CrashDiag")
+
+    def test_missing_secret_fails_without_putting_secret_on_cli(self) -> None:
+        environment = {
+            "CRASHDIAG_HF_BUCKET_ID": "devaanshpa/CrashDiag",
+            "CRASHDIAG_RUN_ID": "run-123",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(ArtifactError, "HF_TOKEN"):
+                artifact_config_from_args(_namespace())
+
+
+class ArtifactUploaderTests(unittest.TestCase):
+    def _config(self, root: Path, policy: str = "required") -> ArtifactConfig:
+        return ArtifactConfig(
+            bucket_id="devaanshpa/CrashDiag",
+            run_id="run-123",
+            prefix="runs",
+            policy=policy,
+            token="hf_do_not_serialize",
+            local_root=root,
+        )
+
+    def test_public_bucket_is_rejected_before_any_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "result.json"
+            artifact.write_text("{}\n", encoding="utf-8")
+            api = _FakeApi(private=False)
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+
+            with self.assertRaisesRegex(ArtifactError, "not private"):
+                uploader.upload_files([artifact], "evaluation")
+
+            self.assertFalse(any(item[0] in {"batch", "sync"} for item in api.operations))
+            self.assertFalse(any(item[0] == "create" for item in api.operations))
+
+    def test_files_manifest_then_success_marker_are_uploaded_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "sft_train.jsonl"
+            second = root / "grpo_train.jsonl"
+            first.write_text('{"sample":1}\n', encoding="utf-8")
+            second.write_text('{"prompt":1}\n', encoding="utf-8")
+            api = _FakeApi()
+            metadata_root = root / "metadata"
+            uploader = ArtifactUploader(self._config(metadata_root), api=api)
+
+            self.assertTrue(
+                uploader.upload_files(
+                    [first, second],
+                    "datasets",
+                    metadata={"HF_TOKEN": "must-not-leak", "seed": 42},
+                )
+            )
+
+            batches = [item for item in api.operations if item[0] == "batch"]
+            self.assertEqual(len(batches), 2)
+            first_additions = batches[0][2]
+            final_additions = batches[1][2]
+            self.assertEqual(
+                {remote for _, remote in first_additions},
+                {
+                    "runs/run-123/datasets/sft_train.jsonl",
+                    "runs/run-123/datasets/grpo_train.jsonl",
+                    "runs/run-123/datasets/manifest.json",
+                },
+            )
+            self.assertEqual(
+                [remote for _, remote in final_additions],
+                ["runs/run-123/datasets/_SUCCESS.json"],
+            )
+
+            manifest_path = metadata_root / "run-123" / "datasets" / "manifest.json"
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_text)
+            self.assertNotIn("must-not-leak", manifest_text)
+            self.assertNotIn("HF_TOKEN", manifest["metadata"])
+            self.assertEqual(len(manifest["files"]), 2)
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest["files"]))
+
+    def test_directory_sync_never_requests_remote_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "outputs"
+            output.mkdir()
+            (output / "adapter_config.json").write_text("{}", encoding="utf-8")
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+
+            uploader.upload_directory(output, "sft", partial=True)
+
+            sync = next(item for item in api.operations if item[0] == "sync")
+            self.assertEqual(sync[1], str(output))
+            self.assertEqual(
+                sync[2],
+                "hf://buckets/devaanshpa/CrashDiag/runs/run-123/sft",
+            )
+            self.assertEqual(len(sync), 3)
+
+    def test_checkpoint_callback_uploads_on_world_zero_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "outputs"
+            output.mkdir()
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+
+            fake_transformers = types.ModuleType("transformers")
+            fake_transformers.TrainerCallback = type("TrainerCallback", (), {})
+            with patch.dict("sys.modules", {"transformers": fake_transformers}):
+                callback = make_checkpoint_upload_callback(uploader, "grpo")
+
+            args = types.SimpleNamespace(output_dir=str(output))
+            control = object()
+            callback.on_save(
+                args,
+                types.SimpleNamespace(is_world_process_zero=False),
+                control,
+            )
+            self.assertFalse(any(item[0] == "sync" for item in api.operations))
+            self.assertIs(
+                callback.on_save(
+                    args,
+                    types.SimpleNamespace(is_world_process_zero=True),
+                    control,
+                ),
+                control,
+            )
+            self.assertEqual(sum(item[0] == "sync" for item in api.operations), 1)
+
+    def test_download_reverses_bucket_sync_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+            destination = root / "download"
+            api.remote_paths.add("runs/run-123/_SUCCESS.json")
+
+            def write_download(target: Path) -> None:
+                stage = target / "sft"
+                stage.mkdir(parents=True)
+                artifact = stage / "adapter_config.json"
+                artifact.write_text("{}", encoding="utf-8")
+                digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+                (stage / "manifest.json").write_text(
+                    json.dumps(
+                        {
+                            "files": [
+                                {
+                                    "path": artifact.name,
+                                    "bytes": artifact.stat().st_size,
+                                    "sha256": digest,
+                                }
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (stage / "_SUCCESS.json").write_text("{}", encoding="utf-8")
+                (target / "_SUCCESS.json").write_text("{}", encoding="utf-8")
+
+            api.download_writer = write_download
+
+            uploader.download_run(destination)
+
+            sync = next(item for item in api.operations if item[0] == "sync")
+            self.assertEqual(
+                sync,
+                (
+                    "sync",
+                    "hf://buckets/devaanshpa/CrashDiag/runs/run-123",
+                    str(destination),
+                ),
+            )
+
+    def test_incomplete_download_requires_explicit_recovery_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+
+            with self.assertRaisesRegex(ArtifactError, "no run-level success"):
+                uploader.download_run(root / "strict")
+
+            def write_partial(target: Path) -> None:
+                checkpoint = target / "sft" / "checkpoint-25"
+                checkpoint.mkdir(parents=True)
+                (checkpoint / "trainer_state.json").write_text("{}", encoding="utf-8")
+
+            api.download_writer = write_partial
+            self.assertTrue(
+                uploader.download_run(root / "recovery", allow_incomplete=True)
+            )
+
+    def test_completed_stage_and_run_markers_cannot_be_blindly_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+            api.remote_paths.add("runs/run-123/sft/_SUCCESS.json")
+
+            with self.assertRaisesRegex(ArtifactError, "already complete"):
+                uploader.start_stage("sft")
+
+            api.remote_paths.remove("runs/run-123/sft/_SUCCESS.json")
+            stages = ("datasets", "sft")
+            for stage in stages:
+                local = root / "metadata" / "run-123" / stage / "_SUCCESS.json"
+                local.parent.mkdir(parents=True, exist_ok=True)
+                local.write_text("{}", encoding="utf-8")
+                api.remote_paths.add(f"runs/run-123/{stage}/_SUCCESS.json")
+
+            self.assertTrue(uploader.complete_run({"stages": list(stages)}))
+            self.assertIn("runs/run-123/_SUCCESS.json", api.remote_paths)
+
+
+if __name__ == "__main__":
+    unittest.main()
