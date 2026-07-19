@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOKS = {
     "sft": ROOT / "notebooks" / "sft.ipynb",
     "grpo": ROOT / "notebooks" / "grpo.ipynb",
+    "grpo_hard": ROOT / "notebooks" / "grpo_hard.ipynb",
     "eval": ROOT / "notebooks" / "eval.ipynb",
 }
 
@@ -122,12 +123,50 @@ class NotebookWorkflowTests(unittest.TestCase):
         sft_notebook = _load(NOTEBOOKS["sft"])
         grpo_notebook = _load(NOTEBOOKS["grpo"])
         eval_notebook = _load(NOTEBOOKS["eval"])
+        hard_notebook = _load(NOTEBOOKS["grpo_hard"])
         cls.sft = _source(sft_notebook)
         cls.grpo = _source(grpo_notebook)
         cls.eval = _source(eval_notebook)
+        cls.grpo_hard = _source(hard_notebook)
         cls.sft_code = _code_source(sft_notebook)
         cls.grpo_code = _code_source(grpo_notebook)
         cls.eval_code = _code_source(eval_notebook)
+        cls.grpo_hard_code = _code_source(hard_notebook)
+
+    def test_hard_grpo_notebook_enforces_calibration_smoke_and_promotion(self) -> None:
+        required = (
+            "PASTE_HARD_GRPO_RUN_ID_HERE",
+            "training.generate_grpo_hard",
+            'required_secret("HF_TOKEN")',
+            'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
+            "download_stage(stage, target, include_paths=paths)",
+            '"grpo_hard_train.jsonl"',
+            '"grpo_hard_eval.jsonl"',
+            '"parent_sft.json"',
+            "read_parent_reference",
+            'service.get("scenario_schema_versions"',
+            "calibrate_main",
+            '"0.9", "1.2", "1.5"',
+            '"--num-generations", str(NUM_GENERATIONS)',
+            '"--require-nonzero-update"',
+            '"--minimum-gate-steps", str(SMOKE_STEPS)',
+            'smoke_gate.get("passed") is not True',
+            '"--model", str(PARENT_SFT_DIR)',
+            "evaluate_jsonl_main",
+            '"hard-evaluation"',
+            '"regression-evaluation"',
+            "promotion_gate(",
+            "require_passed(promotion",
+            "uploader.complete_run",
+            "display(SVG(filename=str(chart)))",
+        )
+        for marker in required:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.grpo_hard)
+        self.assertLess(self.grpo_hard.index("calibrate_main(["), self.grpo_hard.index("grpo_main(smoke_args)"))
+        self.assertLess(self.grpo_hard.index("grpo_main(smoke_args)"), self.grpo_hard.index("grpo_main(full_args)"))
+        self.assertLess(self.grpo_hard.index("promotion_gate("), self.grpo_hard.index("uploader.complete_run"))
+        self.assertEqual(self.grpo_hard.count('"--model", str(PARENT_SFT_DIR)'), 3)
 
     def test_sft_notebook_downloads_verified_bucket_data_before_training(self) -> None:
         required = (
@@ -285,7 +324,9 @@ class NotebookWorkflowTests(unittest.TestCase):
                 self.assertLess(source.index(uninstall), source.index(install))
 
     def test_notebook_cli_flags_match_current_backend_parsers(self) -> None:
+        from training.calibrate_grpo import build_parser as calibration_parser
         from training.evaluate import build_parser as evaluation_parser
+        from training.evaluate_jsonl import build_parser as jsonl_evaluation_parser
         from training.grpo import build_parser as grpo_parser
         from training.sft import build_parser as sft_parser
 
@@ -304,6 +345,26 @@ class NotebookWorkflowTests(unittest.TestCase):
                 "evaluation",
                 _literal_flags(self.grpo_code, call_name="evaluate_main"),
                 evaluation_parser(),
+            ),
+            (
+                "hard_calibration",
+                _literal_flags(self.grpo_hard_code, call_name="calibrate_main"),
+                calibration_parser(),
+            ),
+            (
+                "hard_smoke",
+                _literal_flags(self.grpo_hard_code, list_name="smoke_args"),
+                grpo_parser(),
+            ),
+            (
+                "hard_full",
+                _literal_flags(self.grpo_hard_code, list_name="full_args"),
+                grpo_parser(),
+            ),
+            (
+                "hard_jsonl_evaluation",
+                _literal_flags(self.grpo_hard_code, call_name="evaluate_jsonl_main"),
+                jsonl_evaluation_parser(),
             ),
         )
         for workflow, flags, parser in workflows:

@@ -33,7 +33,9 @@ crashdiag-generate = "training.generate_dataset:main"
 crashdiag-generate-grpo-hard = "training.generate_grpo_hard:main"
 crashdiag-sft = "training.sft:main"
 crashdiag-grpo = "training.grpo:main"
+crashdiag-calibrate-grpo = "training.calibrate_grpo:main"
 crashdiag-evaluate = "training.evaluate:main"
+crashdiag-evaluate-jsonl = "training.evaluate_jsonl:main"
 crashdiag-kaggle = "training.kaggle:main"
 
 [tool.setuptools.packages.find]

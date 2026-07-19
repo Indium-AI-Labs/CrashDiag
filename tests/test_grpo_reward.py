@@ -131,6 +131,19 @@ class MechanicalRewardTests(unittest.TestCase):
 
         self.assertEqual(rewards, [0.0, 0.0])
 
+    def test_rejected_policy_parameters_are_not_backend_errors(self) -> None:
+        seed = sample_seed(42, "disk_full", 0)
+        extra: dict[str, list[object]] = {}
+        rewards = mechanical_reward(
+            ['{"action":"clear_disk","parameters":{"target_percent":101}}'],
+            fault_name=["disk_full"],
+            sample_seed=[seed],
+            prompts=[_prompt("disk_full", seed)],
+            log_extra=lambda name, values: extra.__setitem__(name, list(values)),
+        )
+        self.assertEqual(rewards, [0.0])
+        self.assertEqual(extra["crashdiag_backend_error"], [False])
+
     def test_seed_and_matching_prompt_are_mandatory(self) -> None:
         seed = sample_seed(42, "bad_env_var", 3)
         completion = ['{"action":"rollback_env_var","parameters":{}}']

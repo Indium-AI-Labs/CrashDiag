@@ -118,6 +118,17 @@ def _strict_action_json(value: Any) -> bool:
     )
 
 
+def _policy_action_error(exc: Exception) -> bool:
+    """Distinguish a rejected model action from sandbox infrastructure failure."""
+
+    if isinstance(exc, (KeyError, TypeError, ValueError)):
+        return True
+    return (
+        exc.__class__.__name__ == "SandboxHTTPError"
+        and getattr(exc, "status", None) in {400, 422}
+    )
+
+
 def mechanical_reward(
     completions: list[Any],
     fault_name: list[str] | tuple[str, ...] | str,
@@ -186,6 +197,7 @@ def mechanical_reward(
         resolved = False
         backend_error = False
         strict_json = _strict_action_json(completion)
+        phase = "reconstruct"
         try:
             if isinstance(scenario_seed, bool) or not isinstance(
                 scenario_seed, int
@@ -231,14 +243,17 @@ def mechanical_reward(
                 raise ValueError("prompt does not match the reconstructed scenario")
             parsed = parse_action(completion_text(completion))
             action_name = parsed["action"]
+            phase = "action"
             sandbox.execute_action(action_name, parsed["parameters"])
+            phase = "verify"
             resolved = verifier.is_resolved(fault, sandbox)
             reward = verifier.reward_for_resolution(resolved, sandbox)
-        except Exception:
-            # Infrastructure/parser/action failures are failed rollouts, never
-            # evidence that the application was repaired.
+        except Exception as exc:
+            # Any exception is a failed rollout. A model-supplied parameter
+            # rejected by the action contract is a policy failure; replay,
+            # transport, or verifier failures are backend errors.
             reward = 0.0
-            backend_error = True
+            backend_error = phase != "action" or not _policy_action_error(exc)
         finally:
             if sandbox is not None:
                 _close_sandbox(sandbox)
@@ -365,6 +380,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="grpo",
         help="bucket stage name; use grpo-smoke for a preliminary job",
     )
+    parser.add_argument(
+        "--require-nonzero-update",
+        action="store_true",
+        help="fail before final upload unless the smoke run produced a real update",
+    )
+    parser.add_argument(
+        "--parent-reference",
+        type=Path,
+        default=None,
+        help="parent_sft.json used by --require-nonzero-update",
+    )
+    parser.add_argument("--minimum-gate-steps", type=int, default=20)
     add_artifact_arguments(parser)
     return parser
 
@@ -390,6 +417,10 @@ def _validate_positive(args: argparse.Namespace) -> None:
         raise SystemExit(f"these arguments must be positive: {', '.join(invalid)}")
     if args.num_generations < 2:
         raise SystemExit("--num-generations must be at least 2 for GRPO advantages")
+    if args.minimum_gate_steps < 1:
+        raise SystemExit("--minimum-gate-steps must be positive")
+    if args.require_nonzero_update and args.parent_reference is None:
+        raise SystemExit("--require-nonzero-update requires --parent-reference")
     try:
         world_size = max(1, int(os.environ.get("WORLD_SIZE", "1")))
     except ValueError:
@@ -575,6 +606,7 @@ def main(argv: list[str] | None = None) -> None:
     trainer.save_model(args.output_dir)
     eval_metrics = trainer.evaluate() if eval_enabled else None
     report_bundle: ReportBundle | None = None
+    smoke_gate_result: dict[str, Any] | None = None
     if trainer.is_world_process_zero():
         tokenizer.save_pretrained(args.output_dir)
         trainer.save_state()
@@ -591,6 +623,18 @@ def main(argv: list[str] | None = None) -> None:
             title=f"CrashDiag {args.artifact_stage} training metrics",
         )
         print(f"GRPO report: {report_bundle.summary_path}")
+        if args.require_nonzero_update:
+            from .grpo_gates import require_passed, smoke_gate, write_gate
+
+            smoke_gate_result = smoke_gate(
+                output_path / "trainer_state.json",
+                output_path / "adapter_model.safetensors",
+                args.parent_reference,
+                minimum_steps=args.minimum_gate_steps,
+            )
+            write_gate(output_path / "reports" / "smoke_gate.json", smoke_gate_result)
+            print(json.dumps(smoke_gate_result, indent=2, sort_keys=True))
+            require_passed(smoke_gate_result, "GRPO smoke update gate")
     trainer.accelerator.wait_for_everyone()
     if trainer.is_world_process_zero() and uploader is not None:
         uploader.upload_directory(
@@ -601,6 +645,7 @@ def main(argv: list[str] | None = None) -> None:
                 "train_metrics": result.metrics,
                 "eval_metrics": eval_metrics,
                 "remote_sandbox": bool(args.sandbox_url),
+                "smoke_gate": smoke_gate_result,
                 "report": report_bundle.summary if report_bundle is not None else None,
             },
         )

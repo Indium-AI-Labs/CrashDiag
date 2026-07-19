@@ -14,6 +14,9 @@ health check, never from an LLM grader or a prose rubric.
 - Sparse `1.0`/`0.0` reward; optional mechanical shaping is off by default.
 - Defensive OpenAI-compatible/vLLM agent output parsing.
 - Deterministic, mechanically validated SFT and answer-free GRPO datasets.
+- A schema-v2 hard GRPO-only curriculum with redacted known-good values,
+  genuine stale incident history, harmless failed remediation, and randomized
+  hidden configuration while preserving the six one-action fault families.
 - LoRA SFT using TRL `SFTTrainer` with completion-only loss.
 - GRPO using TRL `GRPOTrainer` and an executable mechanical reward function.
 - Local-weight, PEFT-adapter, or vLLM-endpoint evaluation.
@@ -24,6 +27,9 @@ health check, never from an LLM grader or a prose rubric.
   pipeline logs.
 - Dependency-free SVG, strict-JSON, and Markdown reports for SFT, GRPO, and
   held-out mechanical evaluation, displayed directly in the Kaggle notebooks.
+- Signed cross-run SFT adapter handoff, reward-variance calibration, a mandatory
+  nonzero-update smoke gate, exact 192-row hard evaluation, schema-v1 regression
+  evaluation, and fail-closed promotion gates.
 
 ## Mechanical verification guarantee
 
@@ -61,7 +67,59 @@ PASS: BadEnvVar resolved mechanically
 
 ## Training setup
 
-### Recommended: generate once, then use independent Kaggle notebooks
+### Recommended now: hard-only GRPO from the completed SFT adapter
+
+The original SFT run remains immutable. Generate a new GRPO-only run on a
+trusted CPU machine; the generator downloads the parent SFT stage manifest,
+verifies its success marker and adapter config, and records the signed adapter
+SHA without copying any target completion into the new data:
+
+```bash
+git pull --ff-only origin main
+python -m pip install -e ".[artifacts]"
+python -m training.generate_grpo_hard \
+  --parent-sft-run-id 20260719T113724Z-dataset-b26381b116bc \
+  --train-samples-per-fault 128 \
+  --eval-samples-per-fault 32 \
+  --seed 42
+```
+
+The defaults write and upload 768 `grpo_hard_train.jsonl` rows and 192
+`grpo_hard_eval.jsonl` rows to a fresh private-bucket run. Copy the printed
+`GRPO_RUN_ID` and full `SOURCE_COMMIT` into
+[`notebooks/grpo_hard.ipynb`](notebooks/grpo_hard.ipynb).
+
+Before running the notebook, update the Vultr checkout because schema-v2 uses
+new setup-only sandbox mutations and advertises supported scenario versions:
+
+```bash
+cd ~/CrashDiag
+git pull --ff-only origin main
+docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
+curl --fail https://sandbox.devaanshpathak.com/healthz
+```
+
+The health response must contain `"scenario_schema_versions":[1,2]`. The hard
+notebook then performs, in order:
+
+1. signed download of the hard data, the exact parent SFT adapter, and the
+   original schema-v1 evaluation file;
+2. 8-generation calibration at temperatures `0.9`, `1.2`, then `1.5`, stopping
+   at the first setting with usable mechanically measured reward variance;
+3. a 36-step smoke job that must show positive reward standard deviation,
+   positive gradient norm, mixed success, zero backend errors, finite metrics,
+   and an adapter SHA different from the parent;
+4. a fresh full GRPO job starting from the original SFT adapter;
+5. deterministic evaluation of all 192 hard rows and all 96 original held-out
+   rows; and
+6. promotion only at at least 70% hard success, at least 50% for every fault,
+   at least 95% schema-v1 regression success, and zero backend errors.
+
+Every stage uploads JSON reports and SVG graphs to the same private hard-run
+prefix. If calibration, smoke, evaluation, or promotion fails, the notebook
+raises and never writes the run-level `_SUCCESS.json`.
+
+### Original SFT and schema-v1 workflow
 
 The supported workflow has one CPU data phase followed by two fresh Kaggle GPU
 sessions:
@@ -323,6 +381,31 @@ executed, and `CrashDiagVerifier` returns the sparse reward. The effective
 generation batch (per-device batch x process count x accumulation) and global
 evaluation batch must be divisible by `--num-generations`.
 
+For the hard schema-v2 curriculum, use the new run's files and the temperature
+selected by `training.calibrate_grpo`. The exact evaluator accepts either
+schema version and replays every serialized prompt:
+
+```bash
+python -m training.calibrate_grpo \
+  --model /path/to/verified-sft \
+  --train-file data/grpo_hard_train.jsonl
+
+accelerate launch --module training.grpo \
+  --model /path/to/verified-sft \
+  --train-file data/grpo_hard_train.jsonl \
+  --eval-file "" \
+  --num-generations 8 \
+  --gradient-accumulation-steps 8 \
+  --temperature <selected-temperature> \
+  --beta 0.02 \
+  --output-dir outputs/grpo-hard
+
+python -m training.evaluate_jsonl \
+  --model outputs/grpo-hard \
+  --dataset data/grpo_hard_eval.jsonl \
+  --output-dir outputs/hard-evaluation
+```
+
 For faster generation, install vLLM according to its
 [platform-specific installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/index.html)
 and add:
@@ -475,9 +558,17 @@ private Compose network and obtains TLS certificates automatically.
 - `notebooks/grpo.ipynb`: primary independent Kaggle GRPO and mechanical
   evaluation workflow; restores the exact SFT run and uses the authenticated
   Vultr sandbox.
+- `notebooks/grpo_hard.ipynb`: hard-only Kaggle pipeline with automatic
+  calibration, smoke/full training, two exact evaluations, graphs, private
+  uploads, and fail-closed promotion.
 - `crashdiag/`: core environment, agents, verifier, and sandbox backends.
 - `training/generate_dataset.py`: deterministic dataset construction plus
   automatic private-bucket upload and handoff identifiers.
+- `training/generate_grpo_hard.py`: schema-v2 GRPO-only construction and signed
+  parent-SFT reference.
+- `training/calibrate_grpo.py`, `training/grpo_gates.py`: mechanical variance,
+  update, regression, and promotion gates.
+- `training/evaluate_jsonl.py`: exact prompt/seed evaluation for schema v1/v2.
 - `training/sft.py`: reusable, tested LoRA SFT backend used by the notebook and
   direct CLI.
 - `training/grpo.py`: reusable, tested state-executing GRPO reward and trainer
@@ -511,7 +602,7 @@ Working and verified in this repository:
   checkpoint callbacks, manifests, markers, and verified downloads;
 - a live private-bucket check plus a mechanically validated six-fault dataset
   upload/download/hash-verification integration run;
-- both independent notebooks are structurally and offline validated, including
+- all independent notebooks are structurally and offline validated, including
   clean code-cell compilation, secret-safety checks, downloaded-data-only SFT,
   and their bucket, `RUN_ID`, and `SOURCE_COMMIT` handoff contract;
 - finite-metric filtering, SVG rendering, strict report JSON, notebook display,
@@ -519,12 +610,20 @@ Working and verified in this repository:
   reports;
 - no LLM grading anywhere in the reward path.
 
+Previously completed and audited outside this local test pass:
+
+- the parent SFT adapter run
+  `20260719T113724Z-dataset-b26381b116bc` and its held-out schema-v1 evaluation;
+- the earlier schema-v1 GRPO smoke, which correctly exposed a degenerate
+  zero-loss/zero-gradient run and is not treated as a trained GRPO model.
+
 Not run in this pass:
 
-- a full SFT or GRPO optimization job, because model weights and the GPU
-  training stack are not installed in this local environment;
+- the new schema-v2 calibration, nonzero-update smoke, or full GRPO optimization
+  job, because model weights and the GPU training stack are not installed in
+  this local environment;
 - a live vLLM inference/training process.
-- either notebook end-to-end on a Kaggle GPU; their current validation is
+- the hard-only notebook end-to-end on a Kaggle GPU; its current validation is
   structural and offline rather than a completed training claim;
 - reports from a real Kaggle optimization job have therefore not yet been
   visually inspected or confirmed in the live bucket;
