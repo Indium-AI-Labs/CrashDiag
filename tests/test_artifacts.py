@@ -264,9 +264,12 @@ class ArtifactUploaderTests(unittest.TestCase):
                 artifact = stage / "adapter_config.json"
                 artifact.write_text("{}", encoding="utf-8")
                 digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-                (stage / "manifest.json").write_text(
+                manifest_path = stage / "manifest.json"
+                manifest_path.write_text(
                     json.dumps(
                         {
+                            "run_id": "run-123",
+                            "stage": "sft",
                             "files": [
                                 {
                                     "path": artifact.name,
@@ -278,8 +281,24 @@ class ArtifactUploaderTests(unittest.TestCase):
                     ),
                     encoding="utf-8",
                 )
-                (stage / "_SUCCESS.json").write_text("{}", encoding="utf-8")
-                (target / "_SUCCESS.json").write_text("{}", encoding="utf-8")
+                manifest_digest = hashlib.sha256(
+                    manifest_path.read_bytes()
+                ).hexdigest()
+                (stage / "_SUCCESS.json").write_text(
+                    json.dumps(
+                        {
+                            "status": "complete",
+                            "run_id": "run-123",
+                            "stage": "sft",
+                            "manifest_sha256": manifest_digest,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (target / "_SUCCESS.json").write_text(
+                    json.dumps({"status": "complete", "run_id": "run-123"}),
+                    encoding="utf-8",
+                )
 
             api.download_writer = write_download
 
@@ -294,6 +313,16 @@ class ArtifactUploaderTests(unittest.TestCase):
                     str(destination),
                 ),
             )
+            operations_before_verify = len(api.operations)
+            self.assertTrue(uploader.verify_local_run(destination))
+            self.assertEqual(len(api.operations), operations_before_verify)
+
+            (destination / "sft" / "manifest.json").write_text(
+                '{"run_id":"run-123","stage":"sft","files":[]}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ArtifactError, "does not match"):
+                uploader.verify_local_run(destination)
 
     def test_incomplete_download_requires_explicit_recovery_flag(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

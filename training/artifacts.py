@@ -824,9 +824,35 @@ class ArtifactUploader:
 
         return self._run("download artifact run", operation)
 
+    def verify_local_run(
+        self,
+        directory: str | os.PathLike[str],
+        *,
+        require_complete: bool = True,
+    ) -> bool:
+        """Verify manifests in an existing local run without contacting the Hub."""
+
+        root = Path(directory)
+        if not root.is_dir():
+            raise ArtifactError(f"local artifact run does not exist: {root}")
+        self._verify_download(root, require_complete=require_complete)
+        return True
+
     def _verify_download(self, root: Path, *, require_complete: bool) -> None:
-        if require_complete and not (root / "_SUCCESS.json").is_file():
+        run_success = root / "_SUCCESS.json"
+        if require_complete and not run_success.is_file():
             raise ArtifactError("download is missing the run-level success marker")
+        if run_success.is_file():
+            try:
+                run_marker = json.loads(run_success.read_text(encoding="utf-8"))
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise ArtifactError("invalid run-level success marker") from exc
+            if (
+                not isinstance(run_marker, Mapping)
+                or run_marker.get("status") != "complete"
+                or run_marker.get("run_id") != self.config.run_id
+            ):
+                raise ArtifactError("invalid run-level success marker")
         manifests = sorted(root.glob("*/manifest.json"))
         if not manifests and require_complete:
             raise ArtifactError("download contains no stage manifests")
@@ -840,6 +866,14 @@ class ArtifactUploader:
                 raise ArtifactError(f"invalid artifact manifest: {manifest_path}") from exc
             if not isinstance(entries, list):
                 raise ArtifactError(f"invalid artifact manifest: {manifest_path}")
+            stage = manifest_path.parent.name
+            if (
+                manifest.get("run_id") != self.config.run_id
+                or manifest.get("stage") != stage
+            ):
+                raise ArtifactError(
+                    f"artifact manifest identity mismatch: {manifest_path}"
+                )
             for entry in entries:
                 if not isinstance(entry, Mapping):
                     raise ArtifactError(f"invalid artifact manifest: {manifest_path}")
@@ -857,6 +891,35 @@ class ArtifactUploader:
                     raise ArtifactError(f"downloaded artifact size mismatch: {relative}")
                 if _sha256(candidate) != entry.get("sha256"):
                     raise ArtifactError(f"downloaded artifact hash mismatch: {relative}")
+            stage_success = manifest_path.parent / "_SUCCESS.json"
+            if require_complete and not stage_success.is_file():
+                raise ArtifactError(
+                    f"completed run is missing a stage success marker: {stage}"
+                )
+            if stage_success.is_file():
+                try:
+                    stage_marker = json.loads(
+                        stage_success.read_text(encoding="utf-8")
+                    )
+                except (ValueError, json.JSONDecodeError) as exc:
+                    raise ArtifactError(
+                        f"invalid stage success marker: {stage_success}"
+                    ) from exc
+                if (
+                    not isinstance(stage_marker, Mapping)
+                    or stage_marker.get("status") != "complete"
+                    or stage_marker.get("run_id") != self.config.run_id
+                    or stage_marker.get("stage") != stage
+                    or stage_marker.get("manifest_sha256") != _sha256(manifest_path)
+                ):
+                    raise ArtifactError(
+                        f"stage success marker does not match its manifest: {stage}"
+                    )
+        for stage_success in root.glob("*/_SUCCESS.json"):
+            if not (stage_success.parent / "manifest.json").is_file():
+                raise ArtifactError(
+                    f"stage success marker has no manifest: {stage_success.parent.name}"
+                )
 
 
 def make_checkpoint_upload_callback(
