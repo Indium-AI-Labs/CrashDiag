@@ -5,14 +5,22 @@ This command has only standard-library dependencies beyond the local
 ``MockSandbox`` and retained only after the selected fault reports resolved and
 the sandbox reports healthy.  The GRPO file contains the same prompts and
 scenario identifiers but deliberately contains no target completion.
+
+The CLI defaults to a required upload into the private
+``devaanshpa/CrashDiag`` Storage Bucket, reading ``HF_TOKEN`` from ``.env`` and
+creating a unique run ID.  Local-only generation must be requested explicitly.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import random
+import re
+import secrets
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +30,7 @@ from .artifacts import (
     ArtifactError,
     add_artifact_arguments,
     preload_env,
+    runtime_metadata,
     uploader_from_args,
 )
 from .common import (
@@ -34,10 +43,32 @@ from .common import (
 
 
 SCHEMA_VERSION = 1
+DEFAULT_DATASET_BUCKET = "devaanshpa/CrashDiag"
 DEFAULT_SFT_TRAIN_OUTPUT = Path("data/sft_train.jsonl")
 DEFAULT_SFT_EVAL_OUTPUT = Path("data/sft_eval.jsonl")
 DEFAULT_GRPO_TRAIN_OUTPUT = Path("data/grpo_train.jsonl")
 DEFAULT_GRPO_EVAL_OUTPUT = Path("data/grpo_eval.jsonl")
+_FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _automatic_run_id() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{timestamp}-dataset-{secrets.token_hex(6)}"
+
+
+def _artifact_defaults(args: argparse.Namespace) -> None:
+    """Make private upload the default while preserving explicit overrides."""
+
+    if not args.artifact_bucket:
+        args.artifact_bucket = (
+            os.environ.get("CRASHDIAG_HF_BUCKET_ID", "").strip()
+            or os.environ.get("CRASHDIAG_HF_BUCKET", "").strip()
+            or DEFAULT_DATASET_BUCKET
+        )
+    if not args.run_id:
+        args.run_id = (
+            os.environ.get("CRASHDIAG_RUN_ID", "").strip() or _automatic_run_id()
+        )
 
 
 def sample_seed(base_seed: int, fault_name: str, variation_index: int) -> int:
@@ -324,6 +355,11 @@ def generate_datasets(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate deterministic CrashDiag SFT and answer-free GRPO JSONL.",
+        epilog=(
+            "Default behavior requires HF_TOKEN, uploads to the private "
+            "devaanshpa/CrashDiag bucket, and creates a unique run ID. Use "
+            "--artifact-upload-policy disabled only for a local-only build."
+        ),
     )
     parser.add_argument(
         "--sft-train-output", type=Path, default=DEFAULT_SFT_TRAIN_OUTPUT
@@ -358,12 +394,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     preload_env(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
+    _artifact_defaults(args)
+    provenance = runtime_metadata()
+    source_commit = str(provenance.get("git_commit", "unknown"))
+    print(f"RUN_ID={args.run_id}")
+    print(f"SOURCE_COMMIT={source_commit}")
     try:
         uploader = uploader_from_args(args)
         if uploader is not None:
+            if _FULL_GIT_SHA.fullmatch(source_commit) is None:
+                raise ArtifactError(
+                    "automatic dataset upload requires a Git checkout with a "
+                    "full source commit so Kaggle can reproduce the generator"
+                )
+            uploader.start_run(
+                {
+                    "entrypoint": "training.generate_dataset",
+                    "source_commit": source_commit,
+                }
+            )
             uploader.start_stage(
                 "datasets",
                 {
+                    "source_commit": source_commit,
                     "seed": args.seed,
                     "train_samples_per_fault": args.train_samples_per_fault,
                     "eval_samples_per_fault": args.eval_samples_per_fault,
@@ -411,6 +464,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  eval:  {args.grpo_eval_output}")
     if uploader is not None:
         print(f"artifacts: {uploader.remote_uri('datasets')}")
+    else:
+        print("artifact upload: disabled explicitly")
     return 0
 
 

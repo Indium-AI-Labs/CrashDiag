@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import tempfile
 import unittest
 from collections import Counter
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from crashdiag.agents import ACTION_SPACE, parse_action
 from training.common import (
@@ -16,7 +20,8 @@ from training.common import (
     fault_for_name,
     resolve_precision,
 )
-from training.generate_dataset import generate_datasets, generate_records
+from training.artifacts import ArtifactError
+from training.generate_dataset import generate_datasets, generate_records, main
 from training.sft import build_parser
 
 
@@ -140,6 +145,206 @@ class DatasetGenerationTests(unittest.TestCase):
             self.assertFalse(target.exists())
         with self.assertRaises(ValueError):
             generate_records(samples_per_fault=0)
+
+    def test_cli_automatically_uploads_a_versioned_private_dataset_stage(self) -> None:
+        class FakeUploader:
+            def __init__(self, output: io.StringIO) -> None:
+                self.output = output
+                self.calls: list[tuple[object, ...]] = []
+                self.output_before_start = ""
+
+            def start_run(self, metadata: object) -> None:
+                self.output_before_start = self.output.getvalue()
+                self.calls.append(("start_run", metadata))
+
+            def start_stage(self, stage: str, metadata: object) -> None:
+                self.calls.append(("start_stage", stage, metadata))
+
+            def upload_files(
+                self, files: object, stage: str, *, metadata: object
+            ) -> None:
+                self.calls.append(("upload_files", tuple(files), stage, metadata))
+
+            @staticmethod
+            def remote_uri(stage: str | None = None) -> str:
+                suffix = f"/{stage}" if stage else ""
+                return "hf://buckets/devaanshpa/CrashDiag/runs/generated" + suffix
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = [root / f"dataset-{index}.jsonl" for index in range(4)]
+            missing_env = root / "missing.env"
+            stdout = io.StringIO()
+            fake = FakeUploader(stdout)
+            captured_args: list[object] = []
+
+            def fake_uploader_from_args(args: object) -> FakeUploader:
+                captured_args.append(args)
+                return fake
+
+            argv = [
+                "--env-file",
+                str(missing_env),
+                "--sft-train-output",
+                str(outputs[0]),
+                "--sft-eval-output",
+                str(outputs[1]),
+                "--grpo-train-output",
+                str(outputs[2]),
+                "--grpo-eval-output",
+                str(outputs[3]),
+                "--train-samples-per-fault",
+                "1",
+                "--eval-samples-per-fault",
+                "1",
+                "--seed",
+                "19",
+            ]
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch(
+                    "training.generate_dataset.runtime_metadata",
+                    return_value={"git_commit": "a" * 40},
+                ),
+                patch(
+                    "training.generate_dataset.uploader_from_args",
+                    side_effect=fake_uploader_from_args,
+                ),
+                redirect_stdout(stdout),
+            ):
+                self.assertEqual(main(argv), 0)
+
+            self.assertEqual(len(captured_args), 1)
+            args = captured_args[0]
+            self.assertEqual(args.artifact_bucket, "devaanshpa/CrashDiag")
+            self.assertRegex(
+                args.run_id,
+                r"^\d{8}T\d{6}Z-dataset-[0-9a-f]{12}$",
+            )
+            self.assertIn(f"RUN_ID={args.run_id}", fake.output_before_start)
+            self.assertIn(f"SOURCE_COMMIT={'a' * 40}", fake.output_before_start)
+            self.assertEqual(
+                [call[0] for call in fake.calls],
+                ["start_run", "start_stage", "upload_files"],
+            )
+            self.assertEqual(fake.calls[0][1]["source_commit"], "a" * 40)
+            self.assertEqual(fake.calls[1][1], "datasets")
+            self.assertEqual(fake.calls[1][2]["source_commit"], "a" * 40)
+            self.assertEqual(fake.calls[1][2]["seed"], 19)
+            self.assertEqual(fake.calls[2][1], tuple(outputs))
+            self.assertEqual(fake.calls[2][2], "datasets")
+            self.assertEqual(fake.calls[2][3]["train_rows"], len(FAULT_NAMES))
+            self.assertEqual(fake.calls[2][3]["eval_rows"], len(FAULT_NAMES))
+            self.assertTrue(fake.calls[2][3]["mechanically_validated"])
+            self.assertFalse(fake.calls[2][3]["grpo_targets_included"])
+            self.assertTrue(all(path.is_file() for path in outputs))
+            self.assertIn(
+                "artifacts: hf://buckets/devaanshpa/CrashDiag/runs/generated/datasets",
+                stdout.getvalue(),
+            )
+
+    def test_required_upload_failure_happens_before_dataset_writes(self) -> None:
+        class FailingUploader:
+            @staticmethod
+            def start_run(metadata: object) -> None:
+                raise ArtifactError("private bucket unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "sft-train.jsonl"
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch(
+                    "training.generate_dataset.runtime_metadata",
+                    return_value={"git_commit": "b" * 40},
+                ),
+                patch(
+                    "training.generate_dataset.uploader_from_args",
+                    return_value=FailingUploader(),
+                ),
+                redirect_stdout(stdout),
+            ):
+                with self.assertRaisesRegex(
+                    SystemExit, "private bucket unavailable"
+                ):
+                    main(
+                        [
+                            "--env-file",
+                            str(root / "missing.env"),
+                            "--sft-train-output",
+                            str(target),
+                        ]
+                    )
+            self.assertFalse(target.exists())
+            self.assertRegex(stdout.getvalue(), r"RUN_ID=.*-dataset-[0-9a-f]{12}")
+            self.assertIn(f"SOURCE_COMMIT={'b' * 40}", stdout.getvalue())
+
+    def test_automatic_upload_requires_hf_token_before_dataset_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = [root / f"required-{index}.jsonl" for index in range(4)]
+            stdout = io.StringIO()
+            argv = [
+                "--env-file",
+                str(root / "missing.env"),
+                "--sft-train-output",
+                str(outputs[0]),
+                "--sft-eval-output",
+                str(outputs[1]),
+                "--grpo-train-output",
+                str(outputs[2]),
+                "--grpo-eval-output",
+                str(outputs[3]),
+            ]
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch(
+                    "training.generate_dataset.runtime_metadata",
+                    return_value={"git_commit": "c" * 40},
+                ),
+                redirect_stdout(stdout),
+            ):
+                with self.assertRaisesRegex(SystemExit, "HF_TOKEN"):
+                    main(argv)
+            self.assertTrue(all(not path.exists() for path in outputs))
+            self.assertIn("RUN_ID=", stdout.getvalue())
+            self.assertNotIn("hf_", stdout.getvalue())
+
+    def test_local_only_generation_requires_an_explicit_opt_out(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = [root / f"local-{index}.jsonl" for index in range(4)]
+            argv = [
+                "--env-file",
+                str(root / "missing.env"),
+                "--artifact-upload-policy",
+                "disabled",
+                "--sft-train-output",
+                str(outputs[0]),
+                "--sft-eval-output",
+                str(outputs[1]),
+                "--grpo-train-output",
+                str(outputs[2]),
+                "--grpo-eval-output",
+                str(outputs[3]),
+                "--train-samples-per-fault",
+                "1",
+                "--eval-samples-per-fault",
+                "1",
+            ]
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch(
+                    "training.generate_dataset.runtime_metadata",
+                    return_value={"git_commit": "unknown"},
+                ),
+                redirect_stdout(stdout),
+            ):
+                self.assertEqual(main(argv), 0)
+            self.assertTrue(all(path.is_file() for path in outputs))
+            self.assertIn("artifact upload: disabled explicitly", stdout.getvalue())
 
 
 class SftCliTests(unittest.TestCase):

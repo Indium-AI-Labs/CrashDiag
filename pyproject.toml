@@ -12,6 +12,10 @@ authors = [{ name = "CrashDiag contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
+artifacts = [
+  "huggingface-hub>=1.5,<2",
+  "python-dotenv>=1.0,<2",
+]
 train = [
   "accelerate>=1.10,<2",
   "datasets>=4,<5",
