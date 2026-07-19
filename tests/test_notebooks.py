@@ -125,16 +125,22 @@ class NotebookWorkflowTests(unittest.TestCase):
         cls.sft_code = _code_source(sft_notebook)
         cls.grpo_code = _code_source(grpo_notebook)
 
-    def test_sft_notebook_is_a_complete_independent_producer(self) -> None:
+    def test_sft_notebook_downloads_verified_bucket_data_before_training(self) -> None:
         required = (
             "git\", \"clone",
             "pip\", \"install",
+            "PASTE_DATASET_RUN_ID_HERE",
+            "PASTE_DATASET_SOURCE_COMMIT_HERE",
             "required_secret(\"HF_TOKEN\")",
             "ArtifactUploader",
-            "uploader.start_run",
-            "generate_dataset_main",
+            "download_run(RUN_DIR, allow_incomplete=True)",
+            "verify_local_run(RUN_DIR, require_complete=False)",
+            "DATASET_DIR / \"manifest.json\"",
+            "DATASET_DIR / \"_SUCCESS.json\"",
+            "artifact_commit != CURRENT_COMMIT",
             "sft_main",
-            "data/grpo_train.jsonl",
+            '\"--dataset\", str(DATASET_DIR / \"sft_train.jsonl\")',
+            '\"--eval-dataset\", str(DATASET_DIR / \"sft_eval.jsonl\")',
             "outputs/sft",
             "sft/_SUCCESS.json",
             "crashdiag_handoff.txt",
@@ -144,6 +150,10 @@ class NotebookWorkflowTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, self.sft)
         self.assertNotIn("CRASHDIAG_SANDBOX_TOKEN", self.sft)
+        self.assertNotIn("generate_dataset_main", self.sft)
+        self.assertNotIn("uploader.start_run", self.sft)
+        self.assertNotIn('"data/sft_train.jsonl"', self.sft)
+        self.assertLess(self.sft.index("download_run"), self.sft.index("sft_main"))
 
     def test_grpo_notebook_restores_verified_sft_and_uses_real_sandbox(self) -> None:
         required = (
@@ -181,16 +191,10 @@ class NotebookWorkflowTests(unittest.TestCase):
 
     def test_notebook_cli_flags_match_current_backend_parsers(self) -> None:
         from training.evaluate import build_parser as evaluation_parser
-        from training.generate_dataset import build_parser as dataset_parser
         from training.grpo import build_parser as grpo_parser
         from training.sft import build_parser as sft_parser
 
         workflows = (
-            (
-                "dataset",
-                _literal_flags(self.sft_code, call_name="generate_dataset_main"),
-                dataset_parser(),
-            ),
             (
                 "sft",
                 _literal_flags(self.sft_code, call_name="sft_main"),
