@@ -34,6 +34,7 @@ from .artifacts import (
 )
 from .common import FAULT_NAMES
 from .generate_dataset import prepare_scenario, sample_seed
+from .reporting import generate_evaluation_report
 
 
 SandboxFactory = Callable[[], SandboxBackend]
@@ -604,22 +605,28 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
     )
     output_path = save_report(report, args.output)
+    report_bundle = generate_evaluation_report(
+        output_path,
+        output_path.parent / "evaluation-report",
+    )
     if uploader is not None:
         try:
             uploader.upload_files(
-                [output_path],
+                [output_path, *report_bundle.files],
                 "evaluation",
                 metadata={
                     "model": args.model,
                     "episodes_per_fault": args.episodes_per_fault,
                     "summary": report["summary"],
                     "scoring": "mechanical_fault_resolution",
+                    "report": report_bundle.summary,
                 },
             )
         except ArtifactError as exc:
             parser.exit(2, f"evaluation artifact error: {exc}\n")
     print(format_report(report))
     print(f"report: {output_path}")
+    print(f"evaluation graph: {report_bundle.charts[0]}")
     if uploader is not None:
         print(f"artifacts: {uploader.remote_uri('evaluation')}")
 

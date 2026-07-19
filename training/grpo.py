@@ -28,6 +28,7 @@ from .artifacts import (
 )
 from .common import FAULT_NAMES, completion_text, observation_messages, resolve_precision
 from .generate_dataset import prepare_scenario
+from .reporting import ReportBundle, generate_trainer_report
 
 _SANDBOX_URL = os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip()
 _SANDBOX_TOKEN = os.environ.get("CRASHDIAG_API_TOKEN") or os.environ.get(
@@ -478,6 +479,7 @@ def main(argv: list[str] | None = None) -> None:
     result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(args.output_dir)
     eval_metrics = trainer.evaluate() if eval_enabled else None
+    report_bundle: ReportBundle | None = None
     if trainer.is_world_process_zero():
         tokenizer.save_pretrained(args.output_dir)
         trainer.save_state()
@@ -486,6 +488,14 @@ def main(argv: list[str] | None = None) -> None:
         if eval_metrics is not None:
             trainer.log_metrics("eval", eval_metrics)
             trainer.save_metrics("eval", eval_metrics)
+        output_path = Path(args.output_dir)
+        report_bundle = generate_trainer_report(
+            output_path / "trainer_state.json",
+            output_path / "reports",
+            kind="grpo",
+            title=f"CrashDiag {args.artifact_stage} training metrics",
+        )
+        print(f"GRPO report: {report_bundle.summary_path}")
     trainer.accelerator.wait_for_everyone()
     if trainer.is_world_process_zero() and uploader is not None:
         uploader.upload_directory(
@@ -496,6 +506,7 @@ def main(argv: list[str] | None = None) -> None:
                 "train_metrics": result.metrics,
                 "eval_metrics": eval_metrics,
                 "remote_sandbox": bool(args.sandbox_url),
+                "report": report_bundle.summary if report_bundle is not None else None,
             },
         )
     trainer.accelerator.wait_for_everyone()

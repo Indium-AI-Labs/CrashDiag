@@ -24,6 +24,7 @@ from .artifacts import (
     uploader_from_args,
 )
 from .common import PRECISION_CHOICES, resolve_precision
+from .reporting import ReportBundle, generate_trainer_report
 
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -191,6 +192,7 @@ def train(args: argparse.Namespace) -> Any:
     result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(str(args.output_dir))
     eval_metrics = trainer.evaluate() if eval_enabled else None
+    report_bundle: ReportBundle | None = None
     if trainer.is_world_process_zero():
         tokenizer.save_pretrained(str(args.output_dir))
         trainer.save_state()
@@ -199,6 +201,13 @@ def train(args: argparse.Namespace) -> Any:
         if eval_metrics is not None:
             trainer.log_metrics("eval", eval_metrics)
             trainer.save_metrics("eval", eval_metrics)
+        report_bundle = generate_trainer_report(
+            args.output_dir / "trainer_state.json",
+            args.output_dir / "reports",
+            kind="sft",
+            title="CrashDiag SFT training metrics",
+        )
+        print(f"SFT report: {report_bundle.summary_path}")
     trainer.accelerator.wait_for_everyone()
     if trainer.is_world_process_zero() and uploader is not None:
         uploader.upload_directory(
@@ -208,6 +217,7 @@ def train(args: argparse.Namespace) -> Any:
                 "model": args.model,
                 "train_metrics": result.metrics,
                 "eval_metrics": eval_metrics,
+                "report": report_bundle.summary if report_bundle is not None else None,
             },
         )
     trainer.accelerator.wait_for_everyone()

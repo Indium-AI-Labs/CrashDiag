@@ -219,6 +219,40 @@ class ArtifactUploaderTests(unittest.TestCase):
             )
             self.assertEqual(len(sync), 3)
 
+    def test_final_directory_manifest_includes_nested_training_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "outputs"
+            reports = output / "reports"
+            reports.mkdir(parents=True)
+            (output / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (reports / "loss.svg").write_text("<svg/>", encoding="utf-8")
+            (reports / "metrics_summary.json").write_text(
+                '{"loss":0.5}', encoding="utf-8"
+            )
+            api = _FakeApi()
+            metadata_root = root / "metadata"
+            uploader = ArtifactUploader(self._config(metadata_root), api=api)
+
+            uploader.upload_directory(output, "sft")
+
+            manifest_path = metadata_root / "run-123" / "sft" / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                {entry["path"] for entry in manifest["files"]},
+                {
+                    "adapter_config.json",
+                    "reports/loss.svg",
+                    "reports/metrics_summary.json",
+                },
+            )
+            batches = [operation for operation in api.operations if operation[0] == "batch"]
+            self.assertEqual(len(batches), 2)
+            self.assertEqual(
+                [remote for _, remote in batches[-1][2]],
+                ["runs/run-123/sft/_SUCCESS.json"],
+            )
+
     def test_checkpoint_callback_uploads_on_world_zero_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
