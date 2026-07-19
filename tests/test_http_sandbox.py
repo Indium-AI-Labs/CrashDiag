@@ -18,10 +18,18 @@ from crashdiag.sandbox_apps.http import (
     SandboxTransportError,
 )
 from crashdiag.sandbox_server import SandboxHTTPServer
+from training.common import FAULT_NAMES
 from training.generate_dataset import sample_seed
 from training.generate_dataset import prepare_scenario
 from training.common import observation_messages
 from training.grpo import configure_reward_backend, mechanical_reward
+from training.hard_scenarios import (
+    HARD_SCENARIO_PROFILES,
+    hard_expert_action,
+    hard_observation_messages,
+    hard_sample_seed,
+    prepare_hard_scenario,
+)
 
 
 @contextmanager
@@ -57,6 +65,40 @@ def running_server(
 class HttpSandboxIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         configure_reward_backend(sandbox_url=None, api_token=None)
+
+    def test_hard_scenarios_match_local_and_http_state_views(self) -> None:
+        with running_server() as (_, base_url):
+            for profile_index, profile in enumerate(HARD_SCENARIO_PROFILES):
+                for fault_name in FAULT_NAMES:
+                    with self.subTest(profile=profile, fault=fault_name):
+                        seed = hard_sample_seed(71, fault_name, profile_index)
+                        local_fault, local, _ = prepare_hard_scenario(
+                            fault_name,
+                            seed,
+                            profile,
+                        )
+                        with HttpSandbox(
+                            base_url, api_token="integration-secret"
+                        ) as remote:
+                            remote_fault, _, _ = prepare_hard_scenario(
+                                fault_name,
+                                seed,
+                                profile,
+                                sandbox=remote,
+                            )
+                            self.assertEqual(
+                                hard_observation_messages(local.observe()),
+                                hard_observation_messages(remote.observe()),
+                            )
+                            action = hard_expert_action(fault_name)
+                            local.execute_action(
+                                action["action"], action["parameters"]
+                            )
+                            remote.execute_action(
+                                action["action"], action["parameters"]
+                            )
+                            self.assertTrue(local_fault.is_resolved(local))
+                            self.assertTrue(remote_fault.is_resolved(remote))
 
     def test_fault_module_round_trip_and_session_isolation(self) -> None:
         with running_server() as (server, base_url):

@@ -34,6 +34,7 @@ class _FakeApi:
         self.private = private
         self.operations: list[tuple[object, ...]] = []
         self.remote_paths: set[str] = set()
+        self.bucket_files: dict[str, bytes] = {}
         self.download_writer = None
 
     def create_bucket(self, bucket_id: str, **kwargs: object) -> None:
@@ -48,6 +49,25 @@ class _FakeApi:
     ) -> None:
         self.operations.append(("batch", bucket_id, add))
         self.remote_paths.update(remote for _, remote in add)
+        for local, remote in add:
+            self.bucket_files[remote] = Path(local).read_bytes()
+
+    def download_bucket_files(
+        self,
+        bucket_id: str,
+        files: list[tuple[str, str | Path]],
+        *,
+        raise_on_missing_files: bool = False,
+    ) -> None:
+        self.operations.append(("download_files", bucket_id, files))
+        for remote, local in files:
+            if remote not in self.bucket_files:
+                if raise_on_missing_files:
+                    raise FileNotFoundError(remote)
+                continue
+            destination = Path(local)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(self.bucket_files[remote])
 
     def sync_bucket(self, source: str, destination: str) -> None:
         self.operations.append(("sync", source, destination))
@@ -218,6 +238,66 @@ class ArtifactUploaderTests(unittest.TestCase):
                 "hf://buckets/devaanshpa/CrashDiag/runs/run-123/sft",
             )
             self.assertEqual(len(sync), 3)
+
+    def test_selective_stage_download_verifies_signed_requested_files_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "outputs"
+            checkpoint = output / "checkpoint-10"
+            checkpoint.mkdir(parents=True)
+            (output / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (output / "adapter_model.safetensors").write_bytes(b"signed-adapter")
+            (checkpoint / "optimizer.pt").write_bytes(b"large-checkpoint")
+            api = _FakeApi()
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+            uploader.upload_directory(output, "sft")
+
+            # The fake sync records the directory but does not copy its payload,
+            # so populate the same remote files a real bucket sync would hold.
+            for path in output.rglob("*"):
+                if path.is_file():
+                    relative = path.relative_to(output).as_posix()
+                    remote = f"runs/run-123/sft/{relative}"
+                    api.remote_paths.add(remote)
+                    api.bucket_files[remote] = path.read_bytes()
+
+            destination = root / "handoff"
+            selected = ["adapter_config.json", "adapter_model.safetensors"]
+            self.assertTrue(
+                uploader.download_stage(
+                    "sft",
+                    destination,
+                    include_paths=selected,
+                )
+            )
+            self.assertTrue(
+                uploader.verify_local_stage(
+                    destination,
+                    "sft",
+                    include_paths=selected,
+                )
+            )
+            self.assertTrue((destination / "adapter_model.safetensors").is_file())
+            self.assertFalse((destination / "checkpoint-10").exists())
+            downloaded = [
+                operation
+                for operation in api.operations
+                if operation[0] == "download_files"
+            ]
+            self.assertEqual(len(downloaded), 2)
+
+    def test_selective_stage_download_rejects_escaping_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=_FakeApi())
+            for value in ("../secret", "/absolute", "C:/windows", "nested//file"):
+                with self.subTest(value=value):
+                    with self.assertRaises(ArtifactError):
+                        uploader.verify_local_stage(
+                            root,
+                            "sft",
+                            include_paths=[value],
+                        )
 
     def test_final_directory_manifest_includes_nested_training_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

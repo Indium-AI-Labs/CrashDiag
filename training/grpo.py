@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from crashdiag.agents import parse_action
+from crashdiag.agents import ACTION_SPACE, parse_action
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 from crashdiag.verifier import CrashDiagVerifier
 
@@ -28,6 +28,12 @@ from .artifacts import (
 )
 from .common import FAULT_NAMES, completion_text, observation_messages, resolve_precision
 from .generate_dataset import prepare_scenario
+from .hard_scenarios import (
+    HARD_SCENARIO_PROFILES,
+    HARD_SCENARIO_SCHEMA_VERSION,
+    hard_observation_messages,
+    prepare_hard_scenario,
+)
 from .reporting import ReportBundle, generate_trainer_report
 
 _SANDBOX_URL = os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip()
@@ -78,11 +84,47 @@ def _close_sandbox(sandbox: SandboxBackend) -> None:
                 continue
 
 
+def _broadcast_column(
+    value: Any,
+    count: int,
+    name: str,
+    *,
+    scalar_types: tuple[type, ...],
+) -> list[Any]:
+    if isinstance(value, scalar_types) and not isinstance(value, bool):
+        values = [value]
+    else:
+        values = list(value)
+    if len(values) == 1 and count > 1:
+        values *= count
+    if len(values) != count:
+        raise ValueError(
+            f"{name} and completions must have equal lengths "
+            f"({len(values)} != {count})"
+        )
+    return values
+
+
+def _strict_action_json(value: Any) -> bool:
+    try:
+        decoded = json.loads(completion_text(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(decoded, dict)
+        and set(decoded).issubset({"action", "parameters"})
+        and decoded.get("action") in ACTION_SPACE
+        and isinstance(decoded.get("parameters", {}), dict)
+    )
+
+
 def mechanical_reward(
     completions: list[Any],
     fault_name: list[str] | tuple[str, ...] | str,
     sample_seed: list[int] | tuple[int, ...] | int | None = None,
     prompts: list[Any] | tuple[Any, ...] | None = None,
+    scenario_schema_version: list[int] | tuple[int, ...] | int | None = None,
+    scenario_profile: list[str] | tuple[str, ...] | str | None = None,
     log_extra: Any | None = None,
     log_metric: Any | None = None,
     **_: Any,
@@ -94,63 +136,83 @@ def mechanical_reward(
     of its generation group.
     """
 
-    names = [fault_name] if isinstance(fault_name, str) else list(fault_name)
-    if len(names) == 1 and len(completions) > 1:
-        names *= len(completions)
-    if len(names) != len(completions):
-        raise ValueError(
-            "fault_name and completions must have equal lengths "
-            f"({len(names)} != {len(completions)})"
-        )
+    count = len(completions)
+    names = _broadcast_column(
+        fault_name, count, "fault_name", scalar_types=(str,)
+    )
     if sample_seed is None:
         raise ValueError("sample_seed is required for exact scenario replay")
-    if isinstance(sample_seed, int) and not isinstance(sample_seed, bool):
-        seeds = [sample_seed]
-    else:
-        seeds = list(sample_seed)
-    if len(seeds) == 1 and len(completions) > 1:
-        seeds *= len(completions)
-    if len(seeds) != len(completions):
-        raise ValueError(
-            "sample_seed and completions must have equal lengths "
-            f"({len(seeds)} != {len(completions)})"
-        )
+    seeds = _broadcast_column(
+        sample_seed, count, "sample_seed", scalar_types=(int,)
+    )
     if prompts is None:
         raise ValueError("prompts are required to verify exact scenario replay")
-    prompt_values = list(prompts)
-    if len(prompt_values) == 1 and len(completions) > 1:
-        prompt_values *= len(completions)
-    if len(prompt_values) != len(completions):
-        raise ValueError(
-            "prompts and completions must have equal lengths "
-            f"({len(prompt_values)} != {len(completions)})"
+    prompt_values = _broadcast_column(
+        prompts, count, "prompts", scalar_types=()
+    )
+    versions = (
+        [1] * count
+        if scenario_schema_version is None
+        else _broadcast_column(
+            scenario_schema_version,
+            count,
+            "scenario_schema_version",
+            scalar_types=(int,),
         )
+    )
+    profiles = (
+        [None] * count
+        if scenario_profile is None
+        else _broadcast_column(
+            scenario_profile,
+            count,
+            "scenario_profile",
+            scalar_types=(str,),
+        )
+    )
 
     rewards: list[float] = []
     parsed_actions: list[str] = []
     resolved_values: list[bool] = []
     backend_errors: list[bool] = []
+    strict_json_values: list[bool] = []
     verifier = CrashDiagVerifier()
 
-    for completion, name, scenario_seed, supplied_prompt in zip(
-        completions, names, seeds, prompt_values
+    for completion, name, scenario_seed, supplied_prompt, version, profile in zip(
+        completions, names, seeds, prompt_values, versions, profiles, strict=True
     ):
         sandbox: SandboxBackend | None = None
         action_name = "wait_and_observe"
         resolved = False
         backend_error = False
+        strict_json = _strict_action_json(completion)
         try:
             if isinstance(scenario_seed, bool) or not isinstance(
                 scenario_seed, int
             ):
                 raise TypeError("sample_seed values must be integers")
+            if isinstance(version, bool) or not isinstance(version, int):
+                raise TypeError("scenario_schema_version values must be integers")
             sandbox = _new_sandbox()
-            fault, _, _ = prepare_scenario(
-                str(name),
-                scenario_seed,
-                sandbox=sandbox,
-            )
-            expected_prompt = observation_messages(sandbox.observe())
+            if version == 1:
+                fault, _, _ = prepare_scenario(
+                    str(name),
+                    scenario_seed,
+                    sandbox=sandbox,
+                )
+                expected_prompt = observation_messages(sandbox.observe())
+            elif version == HARD_SCENARIO_SCHEMA_VERSION:
+                if not isinstance(profile, str):
+                    raise TypeError("schema-v2 scenarios require scenario_profile")
+                fault, _, _ = prepare_hard_scenario(
+                    str(name),
+                    scenario_seed,
+                    profile,
+                    sandbox=sandbox,
+                )
+                expected_prompt = hard_observation_messages(sandbox.observe())
+            else:
+                raise ValueError(f"unsupported scenario schema version: {version}")
             expected_json = json.dumps(
                 expected_prompt,
                 ensure_ascii=False,
@@ -185,14 +247,74 @@ def mechanical_reward(
         parsed_actions.append(action_name)
         resolved_values.append(resolved)
         backend_errors.append(backend_error)
+        strict_json_values.append(strict_json)
 
     if callable(log_extra):
         log_extra("crashdiag_action", parsed_actions)
         log_extra("crashdiag_resolved", resolved_values)
         log_extra("crashdiag_backend_error", backend_errors)
+        log_extra("crashdiag_strict_json", strict_json_values)
     if callable(log_metric) and rewards:
         log_metric("crashdiag/success_rate", sum(rewards) / len(rewards))
+        log_metric(
+            "crashdiag/backend_error_rate",
+            sum(backend_errors) / len(backend_errors),
+        )
+        log_metric(
+            "crashdiag/strict_json_rate",
+            sum(strict_json_values) / len(strict_json_values),
+        )
     return rewards
+
+
+def validate_grpo_dataset(dataset: Any, label: str = "GRPO dataset") -> None:
+    """Fail closed on unknown faults or non-replayable scenario schemas."""
+
+    required_columns = {"prompt", "fault_name", "sample_seed"}
+    columns = set(dataset.column_names)
+    missing = required_columns.difference(columns)
+    if missing:
+        raise SystemExit(f"{label} is missing columns: {sorted(missing)}")
+    unknown_faults = sorted(
+        {str(name) for name in dataset["fault_name"] if str(name) not in FAULT_NAMES}
+    )
+    if unknown_faults:
+        raise SystemExit(f"{label} contains unknown faults: {unknown_faults}")
+    versions = (
+        [1] * len(dataset)
+        if "scenario_schema_version" not in columns
+        else list(dataset["scenario_schema_version"])
+    )
+    unknown_versions = sorted(
+        {
+            value
+            for value in versions
+            if isinstance(value, bool)
+            or not isinstance(value, int)
+            or value not in {1, HARD_SCENARIO_SCHEMA_VERSION}
+        },
+        key=str,
+    )
+    if unknown_versions:
+        raise SystemExit(
+            f"{label} contains unsupported schema versions: {unknown_versions}"
+        )
+    if HARD_SCENARIO_SCHEMA_VERSION in versions:
+        if "scenario_profile" not in columns:
+            raise SystemExit(f"{label} schema-v2 rows require scenario_profile")
+        profiles = list(dataset["scenario_profile"])
+        invalid_profiles = sorted(
+            {
+                str(profile)
+                for version, profile in zip(versions, profiles, strict=True)
+                if version == HARD_SCENARIO_SCHEMA_VERSION
+                and profile not in HARD_SCENARIO_PROFILES
+            }
+        )
+        if invalid_profiles:
+            raise SystemExit(
+                f"{label} contains unsupported scenario profiles: {invalid_profiles}"
+            )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -344,41 +466,14 @@ def main(argv: list[str] | None = None) -> None:
         ) from exc
 
     train_dataset = load_dataset("json", data_files=str(train_path), split="train")
-    required_columns = {"prompt", "fault_name", "sample_seed"}
-    missing = required_columns.difference(train_dataset.column_names)
-    if missing:
-        raise SystemExit(f"GRPO dataset is missing columns: {sorted(missing)}")
-    unknown_faults = sorted(
-        {
-            str(name)
-            for name in train_dataset["fault_name"]
-            if str(name) not in FAULT_NAMES
-        }
-    )
-    if unknown_faults:
-        raise SystemExit(f"GRPO dataset contains unknown faults: {unknown_faults}")
+    validate_grpo_dataset(train_dataset)
     eval_dataset = (
         load_dataset("json", data_files=str(eval_path), split="train")
         if eval_path is not None
         else None
     )
     if eval_dataset is not None:
-        missing_eval = required_columns.difference(eval_dataset.column_names)
-        if missing_eval:
-            raise SystemExit(
-                f"GRPO evaluation dataset is missing columns: {sorted(missing_eval)}"
-            )
-        unknown_eval_faults = sorted(
-            {
-                str(name)
-                for name in eval_dataset["fault_name"]
-                if str(name) not in FAULT_NAMES
-            }
-        )
-        if unknown_eval_faults:
-            raise SystemExit(
-                f"GRPO evaluation dataset contains unknown faults: {unknown_eval_faults}"
-            )
+        validate_grpo_dataset(eval_dataset, "GRPO evaluation dataset")
 
     bf16, fp16 = resolve_precision(torch, args.precision)
     dtype = torch.bfloat16 if bf16 else torch.float16 if fp16 else torch.float32

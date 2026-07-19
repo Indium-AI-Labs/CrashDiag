@@ -824,6 +824,105 @@ class ArtifactUploader:
 
         return self._run("download artifact run", operation)
 
+    def download_stage(
+        self,
+        stage: str,
+        destination: str | os.PathLike[str],
+        *,
+        include_paths: Sequence[str] | None = None,
+    ) -> bool:
+        """Download only signed files from one completed stage.
+
+        ``include_paths`` permits a minimal cross-run handoff such as the final
+        adapter and tokenizer without downloading retained optimizer
+        checkpoints.  The stage manifest and success marker are always fetched
+        first and verified; requested paths must be entries in that signed
+        manifest.
+        """
+
+        stage_name = self._stage(stage)
+        target = Path(destination)
+
+        def operation() -> None:
+            self._ensure_private(allow_create=False)
+            if target.exists() and any(target.iterdir()):
+                raise ArtifactError(f"download destination must be empty: {target}")
+            target.mkdir(parents=True, exist_ok=True)
+            remote_base = f"{self.config.remote_root}/{stage_name}"
+            markers = [
+                (f"{remote_base}/manifest.json", target / "manifest.json"),
+                (f"{remote_base}/_SUCCESS.json", target / "_SUCCESS.json"),
+            ]
+            self._retry(
+                f"download {stage_name} stage markers",
+                lambda: self.api.download_bucket_files(
+                    self.config.bucket_id,
+                    markers,
+                    raise_on_missing_files=True,
+                ),
+            )
+            manifest = self._read_stage_manifest(target, stage_name)
+            entries = manifest["files"]
+            entry_map = {
+                str(entry["path"]): entry
+                for entry in entries
+                if isinstance(entry, Mapping) and isinstance(entry.get("path"), str)
+            }
+            selected = (
+                sorted(entry_map)
+                if include_paths is None
+                else [self._safe_manifest_relative(path) for path in include_paths]
+            )
+            if len(set(selected)) != len(selected):
+                raise ArtifactError("stage include paths must be unique")
+            missing = sorted(set(selected).difference(entry_map))
+            if missing:
+                raise ArtifactError(
+                    "requested files are absent from the signed stage manifest: "
+                    + ", ".join(missing)
+                )
+            downloads: list[tuple[str, Path]] = []
+            for relative in selected:
+                destination_path = target / Path(relative)
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                downloads.append((f"{remote_base}/{relative}", destination_path))
+            if downloads:
+                self._retry(
+                    f"download signed {stage_name} stage files",
+                    lambda: self.api.download_bucket_files(
+                        self.config.bucket_id,
+                        downloads,
+                        raise_on_missing_files=True,
+                    ),
+                )
+            self._verify_stage_download(
+                target,
+                stage_name,
+                include_paths=selected,
+            )
+
+        return self._run(f"download {stage_name} artifact stage", operation)
+
+    def verify_local_stage(
+        self,
+        directory: str | os.PathLike[str],
+        stage: str,
+        *,
+        include_paths: Sequence[str] | None = None,
+    ) -> bool:
+        """Verify a full or explicitly selected local stage handoff."""
+
+        root = Path(directory)
+        if not root.is_dir():
+            raise ArtifactError(f"local artifact stage does not exist: {root}")
+        selected = (
+            None
+            if include_paths is None
+            else [self._safe_manifest_relative(path) for path in include_paths]
+        )
+        self._verify_stage_download(root, self._stage(stage), include_paths=selected)
+        return True
+
     def verify_local_run(
         self,
         directory: str | os.PathLike[str],
@@ -837,6 +936,93 @@ class ArtifactUploader:
             raise ArtifactError(f"local artifact run does not exist: {root}")
         self._verify_download(root, require_complete=require_complete)
         return True
+
+    @staticmethod
+    def _safe_manifest_relative(value: str) -> str:
+        if not isinstance(value, str) or not value:
+            raise ArtifactError("stage include paths must be non-empty strings")
+        normalized = value.replace("\\", "/")
+        if normalized.startswith("/"):
+            raise ArtifactError(f"invalid stage include path: {value!r}")
+        parts = normalized.split("/")
+        if any(
+            not part
+            or part in {".", ".."}
+            or not _SAFE_PATH_PART.fullmatch(part)
+            for part in parts
+        ):
+            raise ArtifactError(f"invalid stage include path: {value!r}")
+        return "/".join(parts)
+
+    def _read_stage_manifest(self, root: Path, stage: str) -> dict[str, Any]:
+        manifest_path = root / "manifest.json"
+        success_path = root / "_SUCCESS.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            success = json.loads(success_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise ArtifactError(f"invalid completed stage markers: {stage}") from exc
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("run_id") != self.config.run_id
+            or manifest.get("stage") != stage
+            or not isinstance(manifest.get("files"), list)
+        ):
+            raise ArtifactError(f"artifact stage manifest identity mismatch: {stage}")
+        if (
+            not isinstance(success, Mapping)
+            or success.get("status") != "complete"
+            or success.get("run_id") != self.config.run_id
+            or success.get("stage") != stage
+            or success.get("manifest_sha256") != _sha256(manifest_path)
+        ):
+            raise ArtifactError(f"stage success marker does not match manifest: {stage}")
+        return manifest
+
+    def _verify_stage_download(
+        self,
+        root: Path,
+        stage: str,
+        *,
+        include_paths: Sequence[str] | None,
+    ) -> None:
+        manifest = self._read_stage_manifest(root, stage)
+        entry_map: dict[str, Mapping[str, Any]] = {}
+        for entry in manifest["files"]:
+            if not isinstance(entry, Mapping) or not isinstance(entry.get("path"), str):
+                raise ArtifactError(f"invalid artifact stage manifest: {stage}")
+            relative = self._safe_manifest_relative(str(entry["path"]))
+            if relative in entry_map:
+                raise ArtifactError(f"duplicate path in artifact stage manifest: {relative}")
+            entry_map[relative] = entry
+        selected = sorted(entry_map) if include_paths is None else list(include_paths)
+        missing_manifest = sorted(set(selected).difference(entry_map))
+        if missing_manifest:
+            raise ArtifactError(
+                "requested files are absent from the signed stage manifest: "
+                + ", ".join(missing_manifest)
+            )
+        for relative in selected:
+            entry = entry_map[relative]
+            candidate = root / Path(relative)
+            if not candidate.is_file():
+                raise ArtifactError(f"downloaded artifact is missing: {relative}")
+            if candidate.stat().st_size != entry.get("bytes"):
+                raise ArtifactError(f"downloaded artifact size mismatch: {relative}")
+            if _sha256(candidate) != entry.get("sha256"):
+                raise ArtifactError(f"downloaded artifact hash mismatch: {relative}")
+        allowed = set(selected) | {"manifest.json", "_SUCCESS.json"}
+        actual = {
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+        extras = sorted(actual.difference(allowed))
+        if extras:
+            raise ArtifactError(
+                "downloaded stage contains unsigned or unrequested files: "
+                + ", ".join(extras)
+            )
 
     def _verify_download(self, root: Path, *, require_complete: bool) -> None:
         run_success = root / "_SUCCESS.json"
