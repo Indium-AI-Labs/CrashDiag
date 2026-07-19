@@ -29,6 +29,7 @@ crashdiag-generate = "training.generate_dataset:main"
 crashdiag-sft = "training.sft:main"
 crashdiag-grpo = "training.grpo:main"
 crashdiag-evaluate = "training.evaluate:main"
+crashdiag-kaggle = "training.kaggle:main"
 
 [tool.setuptools.packages.find]
 include = ["crashdiag*", "training*"]

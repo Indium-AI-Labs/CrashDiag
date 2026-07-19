@@ -15,6 +15,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from .artifacts import (
+    ArtifactError,
+    add_artifact_arguments,
+    make_checkpoint_upload_callback,
+    preload_env,
+    process_is_world_zero,
+    uploader_from_args,
+)
 from .common import PRECISION_CHOICES, resolve_precision
 
 
@@ -135,6 +143,8 @@ def train(args: argparse.Namespace) -> Any:
         tokenizer.pad_token = tokenizer.eos_token
 
     eval_enabled = eval_dataset is not None and len(eval_dataset) > 0
+    uploader = getattr(args, "artifact_uploader", None)
+    callback = make_checkpoint_upload_callback(uploader, "sft")
     config = SFTConfig(
         output_dir=str(args.output_dir),
         num_train_epochs=args.epochs,
@@ -144,7 +154,8 @@ def train(args: argparse.Namespace) -> Any:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_ratio=args.warmup_ratio,
         logging_steps=args.logging_steps,
-        save_strategy="epoch",
+        save_strategy=args.save_strategy,
+        save_steps=args.save_steps,
         save_total_limit=args.save_total_limit,
         eval_strategy="epoch" if eval_enabled else "no",
         seed=args.seed,
@@ -175,17 +186,31 @@ def train(args: argparse.Namespace) -> Any:
         eval_dataset=eval_dataset if eval_enabled else None,
         processing_class=tokenizer,
         peft_config=lora,
+        callbacks=[callback] if callback is not None else None,
     )
     result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(str(args.output_dir))
-    tokenizer.save_pretrained(str(args.output_dir))
-    trainer.save_state()
-    trainer.log_metrics("train", result.metrics)
-    trainer.save_metrics("train", result.metrics)
-    if eval_enabled:
-        metrics = trainer.evaluate()
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
+    eval_metrics = trainer.evaluate() if eval_enabled else None
+    if trainer.is_world_process_zero():
+        tokenizer.save_pretrained(str(args.output_dir))
+        trainer.save_state()
+        trainer.log_metrics("train", result.metrics)
+        trainer.save_metrics("train", result.metrics)
+        if eval_metrics is not None:
+            trainer.log_metrics("eval", eval_metrics)
+            trainer.save_metrics("eval", eval_metrics)
+    trainer.accelerator.wait_for_everyone()
+    if trainer.is_world_process_zero() and uploader is not None:
+        uploader.upload_directory(
+            args.output_dir,
+            "sft",
+            metadata={
+                "model": args.model,
+                "train_metrics": result.metrics,
+                "eval_metrics": eval_metrics,
+            },
+        )
+    trainer.accelerator.wait_for_everyone()
     return result
 
 
@@ -214,6 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup-ratio", type=_non_negative_float, default=0.03)
     parser.add_argument("--eval-ratio", type=_non_negative_float, default=0.1)
     parser.add_argument("--logging-steps", type=_positive_int, default=10)
+    parser.add_argument(
+        "--save-strategy", choices=("epoch", "steps"), default="epoch"
+    )
+    parser.add_argument("--save-steps", type=_positive_int, default=50)
     parser.add_argument("--save-total-limit", type=_positive_int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--precision", choices=PRECISION_CHOICES, default="auto")
@@ -235,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--report-to", default="none")
     parser.add_argument("--resume-from-checkpoint", default=None)
+    add_artifact_arguments(parser)
     return parser
 
 
@@ -252,10 +282,25 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    preload_env(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_args(parser, args)
-    train(args)
+    try:
+        uploader = uploader_from_args(args)
+        args.artifact_uploader = uploader
+        if uploader is not None and process_is_world_zero():
+            uploader.start_stage(
+                "sft",
+                {
+                    "model": args.model,
+                    "dataset": str(args.dataset),
+                    "output_dir": str(args.output_dir),
+                },
+            )
+        train(args)
+    except ArtifactError as exc:
+        parser.exit(2, f"SFT artifact error: {exc}\n")
     return 0
 
 

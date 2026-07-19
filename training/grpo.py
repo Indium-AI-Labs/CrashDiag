@@ -18,6 +18,14 @@ from crashdiag.agents import parse_action
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 from crashdiag.verifier import CrashDiagVerifier
 
+from .artifacts import (
+    ArtifactError,
+    add_artifact_arguments,
+    make_checkpoint_upload_callback,
+    preload_env,
+    process_is_world_zero,
+    uploader_from_args,
+)
 from .common import FAULT_NAMES, completion_text, observation_messages, resolve_precision
 from .generate_dataset import prepare_scenario
 
@@ -192,8 +200,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train-file", default="data/grpo_train.jsonl")
     parser.add_argument("--eval-file", default="data/grpo_eval.jsonl")
     parser.add_argument("--output-dir", default="outputs/grpo")
-    parser.add_argument("--sandbox-url", default=_SANDBOX_URL)
-    parser.add_argument("--sandbox-token", default=_SANDBOX_TOKEN)
+    parser.add_argument(
+        "--sandbox-url",
+        default=os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip(),
+    )
+    parser.add_argument(
+        "--sandbox-token",
+        default=(
+            os.environ.get("CRASHDIAG_API_TOKEN")
+            or os.environ.get("CRASHDIAG_SANDBOX_TOKEN")
+        ),
+    )
     parser.add_argument("--sandbox-timeout", type=float, default=15.0)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--epochs", type=float, default=1.0)
@@ -220,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vllm-server-base-url", default=None)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.3)
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--artifact-stage",
+        default="grpo",
+        help="bucket stage name; use grpo-smoke for a preliminary job",
+    )
+    add_artifact_arguments(parser)
     return parser
 
 
@@ -266,8 +289,25 @@ def _validate_positive(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    preload_env(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     _validate_positive(args)
+
+    try:
+        uploader = uploader_from_args(args)
+        if uploader is not None and process_is_world_zero():
+            uploader.start_stage(
+                args.artifact_stage,
+                {
+                    "model": args.model,
+                    "train_file": args.train_file,
+                    "output_dir": args.output_dir,
+                    "remote_sandbox": bool(args.sandbox_url),
+                },
+            )
+    except ArtifactError as exc:
+        parser.exit(2, f"GRPO artifact error: {exc}\n")
 
     train_path = Path(args.train_file)
     if not train_path.is_file():
@@ -424,6 +464,7 @@ def main(argv: list[str] | None = None) -> None:
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         chat_template_kwargs={"enable_thinking": False},
     )
+    callback = make_checkpoint_upload_callback(uploader, args.artifact_stage)
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=mechanical_reward,
@@ -432,10 +473,32 @@ def main(argv: list[str] | None = None) -> None:
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
+        callbacks=[callback] if callback is not None else None,
     )
-    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
+    eval_metrics = trainer.evaluate() if eval_enabled else None
+    if trainer.is_world_process_zero():
+        tokenizer.save_pretrained(args.output_dir)
+        trainer.save_state()
+        trainer.log_metrics("train", result.metrics)
+        trainer.save_metrics("train", result.metrics)
+        if eval_metrics is not None:
+            trainer.log_metrics("eval", eval_metrics)
+            trainer.save_metrics("eval", eval_metrics)
+    trainer.accelerator.wait_for_everyone()
+    if trainer.is_world_process_zero() and uploader is not None:
+        uploader.upload_directory(
+            args.output_dir,
+            args.artifact_stage,
+            metadata={
+                "model": args.model,
+                "train_metrics": result.metrics,
+                "eval_metrics": eval_metrics,
+                "remote_sandbox": bool(args.sandbox_url),
+            },
+        )
+    trainer.accelerator.wait_for_everyone()
 
 
 if __name__ == "__main__":

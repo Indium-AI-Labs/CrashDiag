@@ -18,6 +18,12 @@ from typing import Any
 
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 
+from .artifacts import (
+    ArtifactError,
+    add_artifact_arguments,
+    preload_env,
+    uploader_from_args,
+)
 from .common import (
     FAULT_NAMES,
     action_text,
@@ -344,12 +350,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="evaluation variations for each of the six faults (default: 16)",
     )
     parser.add_argument("--seed", type=int, default=42)
+    add_artifact_arguments(parser)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    preload_env(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     try:
+        uploader = uploader_from_args(args)
+        if uploader is not None:
+            uploader.start_stage(
+                "datasets",
+                {
+                    "seed": args.seed,
+                    "train_samples_per_fault": args.train_samples_per_fault,
+                    "eval_samples_per_fault": args.eval_samples_per_fault,
+                },
+            )
         counts = generate_datasets(
             args.sft_train_output,
             args.sft_eval_output,
@@ -359,7 +378,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             eval_samples_per_fault=args.eval_samples_per_fault,
             seed=args.seed,
         )
-    except (TypeError, ValueError, RuntimeError) as exc:
+        if uploader is not None:
+            uploader.upload_files(
+                [
+                    args.sft_train_output,
+                    args.sft_eval_output,
+                    args.grpo_train_output,
+                    args.grpo_eval_output,
+                ],
+                "datasets",
+                metadata={
+                    "seed": args.seed,
+                    "train_rows": counts["train"],
+                    "eval_rows": counts["eval"],
+                    "mechanically_validated": True,
+                    "grpo_targets_included": False,
+                },
+            )
+    except (ArtifactError, TypeError, ValueError, RuntimeError) as exc:
         raise SystemExit(f"dataset generation failed: {exc}") from exc
     print(
         f"wrote {counts['train']} train + {counts['eval']} eval mechanically "
@@ -373,6 +409,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(f"  train: {args.grpo_train_output}")
     print(f"  eval:  {args.grpo_eval_output}")
+    if uploader is not None:
+        print(f"artifacts: {uploader.remote_uri('datasets')}")
     return 0
 
 

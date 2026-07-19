@@ -26,6 +26,12 @@ from crashdiag.faults.modules import ALL_FAULTS
 from crashdiag.orchestrator import Orchestrator, Trajectory
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 
+from .artifacts import (
+    ArtifactError,
+    add_artifact_arguments,
+    preload_env,
+    uploader_from_args,
+)
 from .common import FAULT_NAMES
 from .generate_dataset import prepare_scenario, sample_seed
 
@@ -454,6 +460,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Transformers device_map value; use 'none' to omit it",
     )
     parser.add_argument("--trust-remote-code", action="store_true")
+    add_artifact_arguments(parser)
     return parser
 
 
@@ -489,8 +496,23 @@ def _dtype_for_precision(torch: Any, precision: str) -> Any:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    preload_env(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     _validate_args(args)
+    try:
+        uploader = uploader_from_args(args)
+        if uploader is not None:
+            uploader.start_stage(
+                "evaluation",
+                {
+                    "model": args.model,
+                    "episodes_per_fault": args.episodes_per_fault,
+                    "remote_sandbox": bool(args.sandbox_url),
+                },
+            )
+    except ArtifactError as exc:
+        parser.exit(2, f"evaluation artifact error: {exc}\n")
 
     if args.base_url:
         agent: Any = BlueAgent(
@@ -582,8 +604,24 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
     )
     output_path = save_report(report, args.output)
+    if uploader is not None:
+        try:
+            uploader.upload_files(
+                [output_path],
+                "evaluation",
+                metadata={
+                    "model": args.model,
+                    "episodes_per_fault": args.episodes_per_fault,
+                    "summary": report["summary"],
+                    "scoring": "mechanical_fault_resolution",
+                },
+            )
+        except ArtifactError as exc:
+            parser.exit(2, f"evaluation artifact error: {exc}\n")
     print(format_report(report))
     print(f"report: {output_path}")
+    if uploader is not None:
+        print(f"artifacts: {uploader.remote_uri('evaluation')}")
 
 
 if __name__ == "__main__":
