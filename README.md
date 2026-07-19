@@ -59,31 +59,37 @@ PASS: BadEnvVar resolved mechanically
 
 ## Training setup
 
-### Recommended: independent Kaggle notebooks
+### Recommended: generate once, then use independent Kaggle notebooks
 
-The primary GPU workflow is split across two self-contained Kaggle notebooks:
+The supported workflow has one CPU data phase followed by two fresh Kaggle GPU
+sessions:
 
-1. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
-   enable Internet and a GPU, and attach only the `HF_TOKEN` Kaggle Secret. Run
-   every cell, then record the exact `RUN_ID` and `SOURCE_COMMIT` printed at
-   the end.
-2. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
+1. On a trusted machine, put `HF_TOKEN` in the repository's ignored `.env`,
+   install `.[artifacts]`, and run `python -m training.generate_dataset`. The
+   generator mechanically validates all examples, creates a unique `RUN_ID`,
+   and automatically uploads the four JSONL files, manifest, and dataset
+   `_SUCCESS.json` to the private `devaanshpa/CrashDiag` bucket. Save the
+   printed `RUN_ID` and `SOURCE_COMMIT`.
+2. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
+   paste those two values, enable Internet and a GPU, and attach only the
+   `HF_TOKEN` Kaggle Secret. The notebook checks out the exact source revision,
+   downloads and hash-verifies the completed dataset stage, and trains SFT
+   exclusively from those downloaded files.
+3. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
    session, enable Internet and a GPU, and attach `HF_TOKEN` plus
-   `CRASHDIAG_SANDBOX_TOKEN`. Paste the SFT notebook's exact `RUN_ID` and
-   `SOURCE_COMMIT`, start in smoke mode, and proceed to the full run only after
-   checking its rewards and backend-error logs.
+   `CRASHDIAG_SANDBOX_TOKEN`. Paste the same `RUN_ID` and `SOURCE_COMMIT`, start
+   in smoke mode, and proceed to the full run only after checking rewards and
+   backend-error logs.
 
-Each notebook clones and installs the repository, loads its own secrets, checks
-its dependencies, and can run without the other notebook's kernel or
-`/kaggle/working` files. Their only handoff is the private
-`devaanshpa/CrashDiag` Storage Bucket plus the exact `RUN_ID` and
-`SOURCE_COMMIT`: the SFT notebook uploads hash-manifested datasets and a
-success-marked SFT adapter, while the GRPO notebook checks out the same source
-revision, downloads the artifacts, and verifies their hashes and recorded
-commit. GRPO refuses to continue when the datasets or SFT success marker are
-missing and never silently falls back to the untrained base model. It then
-probes the authenticated sandbox at `https://sandbox.devaanshpathak.com`
-before loading model weights.
+Neither notebook relies on another kernel or `/kaggle/working` files. Their
+contract is the private bucket plus the exact `RUN_ID` and `SOURCE_COMMIT`.
+SFT permits an incomplete overall run only because generation deliberately
+leaves the pipeline open; it still requires the dataset stage's signed
+manifest and success marker. GRPO independently downloads the same run and
+requires both completed dataset and SFT stages. Neither notebook falls back to
+the checked-in `data/` files or an untrained base model. GRPO then probes the
+authenticated sandbox at `https://sandbox.devaanshpathak.com` before loading
+model weights.
 
 The notebooks are the operational entry points, while `training/*.py` remains
 the reusable, tested implementation backend used by both notebooks and the
@@ -124,16 +130,19 @@ fine-grained write token; never pass the token as a CLI flag:
 HF_TOKEN=hf_...
 CRASHDIAG_HF_BUCKET_ID=devaanshpa/CrashDiag
 CRASHDIAG_ARTIFACT_UPLOAD_POLICY=required
-CRASHDIAG_RUN_ID=20260719T120000Z-experiment
+# CRASHDIAG_RUN_ID=20260719T120000Z-experiment  # optional resume override
 ```
 
-Environment variables override `.env`. The SFT notebook reads only the
+Environment variables override `.env`. Dataset generation defaults to the
+`devaanshpa/CrashDiag` bucket, required upload, and a unique run ID, so its
+normal command needs only `HF_TOKEN` in `.env`. The SFT notebook reads only the
 `HF_TOKEN` Kaggle Secret; the GRPO notebook independently reads `HF_TOKEN` and
 `CRASHDIAG_SANDBOX_TOKEN`. Neither notebook displays a secret or persists it to
 `/kaggle/working`. For direct CLI automation, `scripts/train.sh` generates one
 unique `CRASHDIAG_RUN_ID` when it is not already set. Direct phase commands
-require a run ID whenever bucket upload is enabled; pass
-`--artifact-upload-policy disabled` for an intentional local-only run.
+other than dataset generation require a run ID whenever bucket upload is
+enabled. Pass `--artifact-upload-policy disabled` only for an intentional
+local-only dataset build.
 
 The notebooks perform their corresponding preflights automatically. For an
 optional direct CLI run, verify authenticated write access before using GPU
@@ -174,12 +183,36 @@ hosts; they are not required to use the recommended Kaggle workflow.
 
 #### Generate datasets
 
+Install only the lightweight upload dependencies on the trusted CPU machine:
+
+```bash
+python -m pip install -e ".[artifacts]"
+```
+
+With `HF_TOKEN` in the repository-root `.env`, run:
+
 ```bash
 python -m training.generate_dataset \
   --train-samples-per-fault 128 \
   --eval-samples-per-fault 16 \
   --seed 42
 ```
+
+Upload is automatic and required. The command generates a collision-resistant
+run ID, checks that `devaanshpa/CrashDiag` is private and writable before
+creating data, uploads payloads before the SHA-256 manifest and success marker,
+and prints:
+
+```text
+RUN_ID=<copy-this-into-sft-and-grpo>
+SOURCE_COMMIT=<copy-this-full-git-sha>
+artifacts: hf://buckets/devaanshpa/CrashDiag/runs/<RUN_ID>/datasets
+```
+
+If upload fails, the command fails; it does not report successful generation.
+To retry the same interrupted prefix, pass the printed ID with
+`--run-id <RUN_ID>`. Only use `--artifact-upload-policy disabled` when you
+explicitly want local files without a bucket upload.
 
 This writes:
 
@@ -188,9 +221,9 @@ This writes:
 - `data/grpo_train.jsonl`: 768 answer-free prompts;
 - `data/grpo_eval.jsonl`: 96 answer-free prompts.
 
-The included files were generated with those defaults. Each SFT target was
-executed against a fresh sandbox before it was written. Regeneration with the
-same arguments is byte-deterministic.
+Each SFT target is executed against a fresh sandbox before it is written.
+Regeneration with the same arguments is byte-deterministic; artifact run IDs
+remain unique so unrelated uploads never share a mutable prefix.
 
 #### Supervised fine-tuning
 
@@ -373,13 +406,14 @@ private Compose network and obtains TLS certificates automatically.
 
 ## Repository layout
 
-- `notebooks/sft.ipynb`: primary independent Kaggle dataset-generation and LoRA
+- `notebooks/sft.ipynb`: primary independent Kaggle dataset-download and LoRA
   SFT workflow; requires only the `HF_TOKEN` Kaggle Secret.
 - `notebooks/grpo.ipynb`: primary independent Kaggle GRPO and mechanical
   evaluation workflow; restores the exact SFT run and uses the authenticated
   Vultr sandbox.
 - `crashdiag/`: core environment, agents, verifier, and sandbox backends.
-- `training/generate_dataset.py`: deterministic dataset construction.
+- `training/generate_dataset.py`: deterministic dataset construction plus
+  automatic private-bucket upload and handoff identifiers.
 - `training/sft.py`: reusable, tested LoRA SFT backend used by the notebook and
   direct CLI.
 - `training/grpo.py`: reusable, tested state-executing GRPO reward and trainer
@@ -412,8 +446,8 @@ Working and verified in this repository:
 - a live private-bucket check plus a mechanically validated six-fault dataset
   upload/download/hash-verification integration run;
 - both independent notebooks are structurally and offline validated, including
-  clean code-cell compilation, secret-safety checks, and their bucket,
-  `RUN_ID`, and `SOURCE_COMMIT` handoff contract;
+  clean code-cell compilation, secret-safety checks, downloaded-data-only SFT,
+  and their bucket, `RUN_ID`, and `SOURCE_COMMIT` handoff contract;
 - no LLM grading anywhere in the reward path.
 
 Not run in this pass:
