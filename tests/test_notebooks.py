@@ -147,6 +147,7 @@ class NotebookWorkflowTests(unittest.TestCase):
             "metrics_summary.json",
             "display(SVG(filename=str(chart)))",
             "expected_reports - manifest_paths",
+            'functools.partial(trl.SFTConfig, loss_type="nll")',
             "sft/_SUCCESS.json",
             "crashdiag_handoff.txt",
             "SOURCE_COMMIT",
@@ -159,6 +160,10 @@ class NotebookWorkflowTests(unittest.TestCase):
         self.assertNotIn("uploader.start_run", self.sft)
         self.assertNotIn('"data/sft_train.jsonl"', self.sft)
         self.assertLess(self.sft.index("download_run"), self.sft.index("sft_main"))
+        self.assertLess(
+            self.sft.index('functools.partial(trl.SFTConfig, loss_type="nll")'),
+            self.sft.index("sft_main(["),
+        )
         self.assertLess(
             self.sft.index("sft_main(["),
             self.sft.index("display(SVG(filename=str(chart)))"),
