@@ -118,6 +118,20 @@ accelerate config
 On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`; the
 remaining Python commands are unchanged.
 
+Kaggle images can include an old optional `torchao` build that current PEFT
+rejects while creating an otherwise ordinary LoRA adapter. CrashDiag does not
+use TorchAO, so both notebooks detect and uninstall it before installing the
+training extra. If an older copy of a notebook has already failed with
+`Found an incompatible version of torchao`, run the following in that Kaggle
+session, restart the kernel, and then run the notebook from the beginning:
+
+```bash
+python -m pip uninstall -y torchao
+```
+
+There is no need to regenerate or re-upload a completed dataset for this
+environment-only repair.
+
 The training backend targets the current conversational dataset APIs in
 [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer) and
 [TRL GRPOTrainer](https://huggingface.co/docs/trl/grpo_trainer). Heavy ML
