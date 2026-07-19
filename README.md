@@ -22,6 +22,8 @@ health check, never from an LLM grader or a prose rubric.
 - Private Hugging Face Storage Bucket persistence for datasets, every retained
   checkpoint, final adapters, tokenizer/state/metrics, evaluation reports, and
   pipeline logs.
+- Dependency-free SVG, strict-JSON, and Markdown reports for SFT, GRPO, and
+  held-out mechanical evaluation, displayed directly in the Kaggle notebooks.
 
 ## Mechanical verification guarantee
 
@@ -73,13 +75,15 @@ sessions:
 2. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
    paste those two values, enable Internet and a GPU, and attach only the
    `HF_TOKEN` Kaggle Secret. The notebook checks out the exact source revision,
-   downloads and hash-verifies the completed dataset stage, and trains SFT
-   exclusively from those downloaded files.
+   downloads and hash-verifies the completed dataset stage, trains SFT
+   exclusively from those downloaded files, and displays the generated loss,
+   learning-rate, and gradient charts after their signed bucket upload.
 3. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
    session, enable Internet and a GPU, and attach `HF_TOKEN` plus
    `CRASHDIAG_SANDBOX_TOKEN`. Paste the same `RUN_ID` and `SOURCE_COMMIT`, start
-   in smoke mode, and proceed to the full run only after checking rewards and
-   backend-error logs.
+   in smoke mode, and proceed to the full run only after checking the displayed
+   reward/loss/policy diagnostics and backend-error logs. Full mode also
+   displays mechanically verified success by fault after evaluation.
 
 Neither notebook relies on another kernel or `/kaggle/working` files. Their
 contract is the private bucket plus the exact `RUN_ID` and `SOURCE_COMMIT`.
@@ -156,7 +160,9 @@ The client checks that the bucket is private before every write and refuses an
 existing public bucket. Set `CRASHDIAG_CREATE_ARTIFACT_BUCKET=true` only if the
 first preflight should create a missing private bucket. Stage payloads are
 uploaded before SHA-256 manifests and `_SUCCESS.json`; checkpoint callbacks
-incrementally sync from rank zero after every Trainer save.
+incrementally sync from rank zero after every Trainer save. Final reports are
+generated before stage finalization, so every displayed report is covered by
+the same signed manifest and success marker as its model or evaluation stage.
 
 Download a completed run for later promotion to model and dataset repos:
 
@@ -174,6 +180,41 @@ partial prefix; it does not relax the default used for later promotion.
 Completed stages are manifest-verified. Individual partial checkpoints do not
 yet carry their own success manifest, so notebook auto-resume is off by default
 and partial recovery should be inspected before opting in.
+
+### Training reports
+
+SFT and GRPO read the numeric history already written by Transformers/TRL and
+produce only charts for metrics that are actually present. A typical run stores:
+
+```text
+runs/$RUN_ID/sft/reports/
+  loss.svg
+  learning_rate.svg
+  gradient_norm.svg
+  metrics_history.json
+  metrics_summary.json
+  report.md
+
+runs/$RUN_ID/grpo-smoke/reports/   # or grpo/reports/
+  loss.svg
+  reward.svg
+  policy_diagnostics.svg
+  metrics_history.json
+  metrics_summary.json
+  report.md
+
+runs/$RUN_ID/evaluation/
+  evaluation.json
+  mechanical_success_by_fault.svg
+  mechanical_evaluation_metrics.json
+  mechanical_evaluation_summary.json
+  mechanical_evaluation_report.md
+```
+
+The exact training-chart inventory is dynamic: absent TRL metrics are omitted
+rather than fabricated. These plots are diagnostics. Reward and evaluation
+success remain executable checks against sandbox state; no charting code and no
+LLM grades whether a fault is resolved.
 
 ### Optional direct CLI and automation
 
@@ -420,6 +461,8 @@ private Compose network and obtains TLS certificates automatically.
   used by the notebook and direct CLI.
 - `training/evaluate.py`: reusable local/endpoint mechanical evaluation
   backend.
+- `training/reporting.py`: dependency-free SVG/JSON/Markdown rendering from
+  recorded trainer metrics and mechanically computed evaluation results.
 - `training/kaggle.py`: optional Kaggle Secrets launcher for automated complete
   or phased CLI jobs.
 - `training/artifacts.py`: private bucket preflight, checkpoint sync, manifests,
@@ -448,6 +491,9 @@ Working and verified in this repository:
 - both independent notebooks are structurally and offline validated, including
   clean code-cell compilation, secret-safety checks, downloaded-data-only SFT,
   and their bucket, `RUN_ID`, and `SOURCE_COMMIT` handoff contract;
+- finite-metric filtering, SVG rendering, strict report JSON, notebook display,
+  and signed-manifest inclusion for SFT, GRPO, and mechanical evaluation
+  reports;
 - no LLM grading anywhere in the reward path.
 
 Not run in this pass:
@@ -457,6 +503,8 @@ Not run in this pass:
 - a live vLLM inference/training process.
 - either notebook end-to-end on a Kaggle GPU; their current validation is
   structural and offline rather than a completed training claim;
+- reports from a real Kaggle optimization job have therefore not yet been
+  visually inspected or confirmed in the live bucket;
 - a live Vultr HTTPS deployment from this development machine.
 
 Still stubbed/future work:
