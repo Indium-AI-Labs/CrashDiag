@@ -132,6 +132,15 @@ python -m pip uninstall -y torchao
 There is no need to regenerate or re-upload a completed dataset for this
 environment-only repair.
 
+TRL 1.8 also defaults SFT to its newer `chunked_nll` implementation. That path
+patches the model's LM-head forward method and currently fails when PEFT exposes
+Qwen's forward call as `functools.partial`. CrashDiag explicitly selects the
+documented standard `loss_type="nll"` instead. It keeps completion-only masking
+and the same negative-log-likelihood objective while avoiding that optional
+memory optimization. The SFT notebook applies the same override before loading
+the checked-out training backend, so an existing completed dataset run remains
+usable and does not need to be generated again.
+
 The training backend targets the current conversational dataset APIs in
 [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer) and
 [TRL GRPOTrainer](https://huggingface.co/docs/trl/grpo_trainer). Heavy ML
