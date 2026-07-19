@@ -213,6 +213,21 @@ class HttpSandbox(SandboxBackend):
     def set_proxy_target_port(self, port: int) -> None:
         self._mutation("set_proxy_target_port", {"port": port})
 
+    def set_expected_env_var(self, name: str, value: str) -> None:
+        self._mutation("set_expected_env_var", {"name": name, "value": value})
+
+    def set_required_dependency_version(self, name: str, version: str) -> None:
+        self._mutation(
+            "set_required_dependency_version",
+            {"name": name, "version": version},
+        )
+
+    def set_app_port(self, port: int) -> None:
+        self._mutation("set_app_port", {"port": port})
+
+    def set_disk_health_threshold(self, percent: float) -> None:
+        self._mutation("set_disk_health_threshold", {"percent": percent})
+
     def inject_fault(self, fault_name: str) -> dict[str, Any]:
         """Inject one server-allowlisted built-in fault and return the observation."""
 

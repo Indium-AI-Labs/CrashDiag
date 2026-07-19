@@ -117,6 +117,18 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
 
                 sandbox.set_proxy_target_port(8081)
                 sandbox.fix_port_config()
+                sandbox.set_expected_env_var("APP_ENV", "canary")
+                sandbox.set_required_dependency_version("web-framework", "2.1.1")
+                sandbox.set_app_port(8443)
+                sandbox.set_disk_health_threshold(80.0)
+                configured = sandbox.observe()
+                self.assertEqual(configured["environment"]["expected"]["APP_ENV"], "canary")
+                self.assertEqual(
+                    configured["dependencies"]["required"]["web-framework"],
+                    "2.1.1",
+                )
+                self.assertEqual(configured["network"]["app_port"], 8443)
+                self.assertEqual(configured["disk"]["healthy_below_percent"], 80.0)
                 self.assertTrue(sandbox.health_check()["healthy"])
 
                 observation = sandbox.inject_fault("disk_full")
@@ -145,6 +157,7 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
+            self.assertIn(2, payload["scenario_schema_versions"])
 
             with self.assertRaises(SandboxHTTPError) as missing:
                 HttpSandbox(base_url)

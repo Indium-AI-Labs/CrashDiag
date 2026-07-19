@@ -15,6 +15,32 @@ from crashdiag.sandbox_apps.mock import MockSandbox
 
 
 class MockFaultTests(unittest.TestCase):
+    def test_scenario_baseline_configuration_is_mechanical_and_repairable(self) -> None:
+        sandbox = MockSandbox()
+        sandbox.set_expected_env_var("APP_ENV", "canary")
+        sandbox.set_required_dependency_version("web-framework", "2.1.1")
+        sandbox.set_app_port(8443)
+        sandbox.set_disk_health_threshold(80.0)
+
+        observation = sandbox.observe()
+        self.assertEqual(observation["environment"]["expected"]["APP_ENV"], "canary")
+        self.assertEqual(observation["environment"]["variables"]["APP_ENV"], "canary")
+        self.assertEqual(
+            observation["dependencies"]["required"]["web-framework"], "2.1.1"
+        )
+        self.assertEqual(
+            observation["dependencies"]["installed"]["web-framework"], "2.1.1"
+        )
+        self.assertEqual(observation["network"], {"app_port": 8443, "proxy_target_port": 8443})
+        self.assertEqual(observation["disk"]["healthy_below_percent"], 80.0)
+        self.assertTrue(sandbox.health_check()["healthy"])
+
+        sandbox.set_dependency_version("web-framework", "0.0.1")
+        sandbox.fix_dependency()
+        sandbox.set_proxy_target_port(3000)
+        sandbox.fix_port_config()
+        self.assertTrue(sandbox.health_check()["healthy"])
+
     CASES = (
         (OOMKill, "restart_app"),
         (BadEnvVar, "rollback_env_var"),

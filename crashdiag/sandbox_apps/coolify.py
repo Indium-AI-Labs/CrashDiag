@@ -136,5 +136,25 @@ class CoolifySandbox(SandboxBackend):
 
         self._unimplemented("set_proxy_target_port")
 
+    def set_expected_env_var(self, name: str, value: str) -> None:
+        """Configure one known-good environment baseline."""
+
+        self._unimplemented("set_expected_env_var")
+
+    def set_required_dependency_version(self, name: str, version: str) -> None:
+        """Configure one known-good dependency baseline."""
+
+        self._unimplemented("set_required_dependency_version")
+
+    def set_app_port(self, port: int) -> None:
+        """Configure the application and healthy proxy port."""
+
+        self._unimplemented("set_app_port")
+
+    def set_disk_health_threshold(self, percent: float) -> None:
+        """Configure the disk-health boundary."""
+
+        self._unimplemented("set_disk_health_threshold")
+
 
 __all__ = ["CoolifySandbox"]

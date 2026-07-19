@@ -83,6 +83,22 @@ class SandboxBackend(ABC):
     def set_proxy_target_port(self, port: int) -> None:
         """Set the reverse proxy's upstream port for fault injection."""
 
+    @abstractmethod
+    def set_expected_env_var(self, name: str, value: str) -> None:
+        """Configure one known-good environment value for scenario setup."""
+
+    @abstractmethod
+    def set_required_dependency_version(self, name: str, version: str) -> None:
+        """Configure one known-good dependency version for scenario setup."""
+
+    @abstractmethod
+    def set_app_port(self, port: int) -> None:
+        """Configure the app and healthy proxy port for scenario setup."""
+
+    @abstractmethod
+    def set_disk_health_threshold(self, percent: float) -> None:
+        """Configure the disk-health boundary for scenario setup."""
+
     def execute_action(
         self,
         action: str,
@@ -375,6 +391,47 @@ class MockSandbox(SandboxBackend):
         self._validate_port(port)
         self.proxy_target_port = port
         self.logs.append(f"proxy upstream changed to port {port}")
+
+    def set_expected_env_var(self, name: str, value: str) -> None:
+        """Set a clean environment baseline without adding diagnostic history."""
+
+        if not isinstance(name, str) or not name:
+            raise ValueError("environment variable name must be non-empty")
+        if not isinstance(value, str):
+            raise TypeError("environment variable value must be a string")
+        self.expected_env[name] = value
+        self.env_vars[name] = value
+        self._env_history.pop(name, None)
+        self._env_change_order = [item for item in self._env_change_order if item != name]
+
+    def set_required_dependency_version(self, name: str, version: str) -> None:
+        """Set installed and required dependency state to the same clean baseline."""
+
+        if not isinstance(name, str) or not name:
+            raise ValueError("dependency name must be non-empty")
+        if not isinstance(version, str) or not version:
+            raise ValueError("dependency version must be non-empty")
+        self.required_dependencies[name] = version
+        self.dependencies[name] = version
+
+    def set_app_port(self, port: int) -> None:
+        """Set the app and proxy to a healthy listening-port baseline."""
+
+        self._validate_port(port)
+        self.app_port = port
+        self.proxy_target_port = port
+
+    def set_disk_health_threshold(self, percent: float) -> None:
+        """Set a finite health boundary while retaining a healthy baseline."""
+
+        if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+            raise TypeError("disk health threshold must be numeric")
+        threshold = float(percent)
+        if not 1.0 <= threshold <= 100.0:
+            raise ValueError("disk health threshold must be between 1 and 100")
+        self.disk_health_threshold = threshold
+        if self.disk_usage_percent >= threshold:
+            self.disk_usage_percent = max(0.0, min(40.0, threshold - 5.0))
 
     @staticmethod
     def _validate_port(port: int) -> None:
