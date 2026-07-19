@@ -1,0 +1,8 @@
+{
+	admin off
+}
+
+{$CRASHDIAG_SANDBOX_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy sandbox:8765
+}
