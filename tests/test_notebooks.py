@@ -213,6 +213,25 @@ class NotebookWorkflowTests(unittest.TestCase):
         self.assertIn("Set RUN_ID to the exact value", self.grpo)
         self.assertNotIn("outputs/sft\"),\n    \"--train-file", self.grpo)
 
+    def test_notebooks_remove_unused_torchao_before_training_install(self) -> None:
+        for workflow, source in (("sft", self.sft), ("grpo", self.grpo)):
+            with self.subTest(workflow=workflow):
+                probe = '[sys.executable, "-m", "pip", "show", "torchao"]'
+                uninstall = (
+                    '[sys.executable, "-m", "pip", "uninstall", "-y", "torchao"]'
+                )
+                install = (
+                    '[sys.executable, "-m", "pip", "install", "-e", '
+                    'f"{REPO_DIR}[train]"]'
+                )
+                self.assertIn("CrashDiag does not use it", source)
+                self.assertIn(probe, source)
+                self.assertIn(uninstall, source)
+                self.assertIn(f"subprocess.run({uninstall}, check=True)", source)
+                self.assertIn(install, source)
+                self.assertLess(source.index(probe), source.index(uninstall))
+                self.assertLess(source.index(uninstall), source.index(install))
+
     def test_notebook_cli_flags_match_current_backend_parsers(self) -> None:
         from training.evaluate import build_parser as evaluation_parser
         from training.grpo import build_parser as grpo_parser
