@@ -163,6 +163,10 @@ def train(args: argparse.Namespace) -> Any:
         data_seed=args.seed,
         max_length=args.max_length,
         completion_only_loss=True,
+        # TRL 1.8 defaults to chunked_nll, whose LM-head patch assumes a bound
+        # forward method. PEFT can expose functools.partial for Qwen models.
+        # Standard NLL has the same objective and preserves completion masking.
+        loss_type="nll",
         packing=args.packing,
         gradient_checkpointing=args.gradient_checkpointing,
         bf16=bf16,

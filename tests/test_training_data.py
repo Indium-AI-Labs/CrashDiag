@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
@@ -357,6 +358,21 @@ class SftCliTests(unittest.TestCase):
         self.assertEqual(args.output_dir, Path("outputs/sft"))
         split_args = build_parser().parse_args(["--no-eval-dataset"])
         self.assertIsNone(split_args.eval_dataset)
+
+    def test_sft_explicitly_uses_standard_nll_instead_of_trl_default(self) -> None:
+        source_path = Path(__file__).resolve().parents[1] / "training" / "sft.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        config_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "SFTConfig"
+        ]
+        self.assertEqual(len(config_calls), 1)
+        keywords = {keyword.arg: keyword.value for keyword in config_calls[0].keywords}
+        self.assertIn("loss_type", keywords)
+        self.assertEqual(ast.literal_eval(keywords["loss_type"]), "nll")
 
 
 if __name__ == "__main__":
