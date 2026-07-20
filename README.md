@@ -115,7 +115,7 @@ hard notebook then performs, in order:
 2. download and verify the signed completions from the immutable
    `calibration-contract-v2` stage, then mechanically re-execute them under
    the declarative dependency-repair contract into
-   `calibration-declarative-v3`. Recorded rewards are ignored, no model is
+   `calibration-declarative-v3-live`. Recorded rewards are ignored, no model is
    loaded, and the new gate requires positive rewards for every fault family
    as well as useful mixed groups;
 3. a 36-step smoke job that must show positive reward standard deviation,
@@ -411,7 +411,7 @@ python -m training.calibrate_grpo \
   --reuse-rollouts /verified/calibration-contract-v2/rollouts.jsonl \
   --reuse-report /verified/calibration-contract-v2/calibration.json \
   --source-rollout-stage calibration-contract-v2 \
-  --artifact-stage calibration-declarative-v3
+  --artifact-stage calibration-declarative-v3-live
 
 accelerate launch --module training.grpo \
   --model /path/to/verified-sft \

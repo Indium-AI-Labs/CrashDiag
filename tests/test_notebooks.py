@@ -151,7 +151,7 @@ class NotebookWorkflowTests(unittest.TestCase):
             'hard_summary.get("action_contract") != "parameter_free_repairs"',
             "calibrate_main",
             'SOURCE_ROLLOUT_STAGE = "calibration-contract-v2"',
-            'CALIBRATION_STAGE = "calibration-declarative-v3"',
+            'CALIBRATION_STAGE = "calibration-declarative-v3-live"',
             "uploader.stage_is_complete(CALIBRATION_STAGE)",
             '"1.5", "1.6", "1.7"',
             '"--top-p", "0.9"',
