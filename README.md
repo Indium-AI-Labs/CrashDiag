@@ -656,12 +656,21 @@ Previously completed and audited outside this local test pass:
   strict JSON and healthy mixed-group rates but confirmed that every
   dependency completion still supplied a hallucinated version. Its signed
   completions are retained as input to a fresh mechanical rescore; its old
-  recorded rewards are never trusted.
+  recorded rewards are never trusted;
+- the first immutable declarative rescore, `calibration-declarative-v3`, which
+  correctly failed with a 100% backend error rate because the local operator
+  environment pointed at `127.0.0.1` instead of Vultr. It remains an audit
+  artifact and is not used as training evidence;
+- the corrected live Vultr rescore, `calibration-declarative-v3-live`, whose
+  signed HF stage passed. Temperature `1.6` selected a `0.7951` mean mechanical
+  reward, `98.61%` strict JSON, mixed rewards in `10/36` prompt groups, positive
+  rewards in all six fault families, and a `0%` backend error rate. The report,
+  rollout log, SVG, manifest, and success marker were downloaded again and
+  hash-verified after upload.
 
 Not run in this pass:
 
-- the declarative dependency rescore, nonzero-update smoke, or full GRPO
-  optimization job;
+- the nonzero-update GRPO smoke or full GRPO optimization job;
 - a live vLLM inference/training process.
 - the hard-only notebook end-to-end on a Kaggle GPU; its current validation is
   structural and offline rather than a completed training claim;
