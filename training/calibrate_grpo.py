@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import os
+import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -294,6 +295,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompts-per-fault-profile", type=int, default=2)
     parser.add_argument("--reward-workers", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=48)
+    parser.add_argument("--top-p", type=float, default=1.0)
+    parser.add_argument("--top-k", type=int, default=0)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--sandbox-url", default=os.environ.get("CRASHDIAG_SANDBOX_URL", ""))
@@ -319,6 +322,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("calibration requires at least two generations and one prompt per cell")
     if any(not math.isfinite(value) or value <= 0 for value in args.temperatures):
         parser.error("calibration temperatures must be finite and positive")
+    if not math.isfinite(args.top_p) or not 0 < args.top_p <= 1:
+        parser.error("--top-p must be finite and in (0, 1]")
+    if args.top_k < 0:
+        parser.error("--top-k cannot be negative")
     try:
         uploader = uploader_from_args(args)
         if uploader is not None:
@@ -328,6 +335,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "model": args.model,
                     "train_file": args.train_file,
                     "temperatures": args.temperatures,
+                    "top_p": args.top_p,
+                    "top_k": args.top_k,
                     "mechanical_reward": True,
                 },
             )
@@ -350,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 messages,
                 num_return_sequences=count,
                 temperature=temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
                 max_new_tokens=args.max_new_tokens,
             )
 
@@ -362,6 +373,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             reward_workers=args.reward_workers,
             progress=print,
         )
+        report["sampling"] = {
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "max_new_tokens": args.max_new_tokens,
+        }
         _write_outputs(args.output_dir, report, rollouts)
         if uploader is not None:
             uploader.upload_directory(
@@ -370,14 +386,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 metadata={
                     "passed": report["passed"],
                     "selected_temperature": report["selected_temperature"],
+                    "sampling": report["sampling"],
                     "scoring": report["scoring"],
                 },
             )
     except (ArtifactError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        parser.exit(2, f"GRPO calibration failed: {exc}\n")
+        print(f"GRPO calibration failed: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(report, indent=2, sort_keys=True))
     if not report["passed"]:
-        parser.exit(3, "GRPO calibration found no usable mechanical reward variance; full training aborted\n")
+        print(
+            "GRPO calibration found no usable mechanical reward variance; "
+            "full training aborted",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 

@@ -575,6 +575,15 @@ class ArtifactUploader:
             path = f"{path}/{self._stage(stage)}"
         return f"hf://buckets/{self.config.bucket_id}/{path}"
 
+    def stage_is_complete(self, stage: str) -> bool:
+        """Return whether an immutable remote stage has a success marker."""
+
+        stage_name = self._stage(stage)
+        self._ensure_private(allow_create=False)
+        return self._remote_exists(
+            f"{self.config.remote_root}/{stage_name}/_SUCCESS.json"
+        )
+
     def _batch(self, additions: Sequence[tuple[Path, str]]) -> None:
         normalized = [(str(path), remote) for path, remote in additions]
         self._retry(
@@ -765,11 +774,6 @@ class ArtifactUploader:
             requested_stages = list((metadata or {}).get("stages", []))
             if not requested_stages:
                 raise ArtifactError("at least one completed stage is required")
-            missing_local = [
-                stage
-                for stage in requested_stages
-                if not self._marker_path(str(stage), "_SUCCESS.json").is_file()
-            ]
             missing_remote = [
                 stage
                 for stage in requested_stages
@@ -777,10 +781,10 @@ class ArtifactUploader:
                     f"{self.config.remote_root}/{self._stage(str(stage))}/_SUCCESS.json"
                 )
             ]
-            if missing_local or missing_remote:
+            if missing_remote:
                 raise ArtifactError(
-                    "cannot complete run; missing stage success markers "
-                    f"(local={missing_local}, remote={missing_remote})"
+                    "cannot complete run; missing remote stage success markers "
+                    f"(remote={missing_remote})"
                 )
             marker = _write_json(
                 self.config.local_run_root / "_SUCCESS.json",

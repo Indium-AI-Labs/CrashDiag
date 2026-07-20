@@ -176,6 +176,17 @@ class ArtifactUploaderTests(unittest.TestCase):
             self.assertFalse(any(item[0] in {"batch", "sync"} for item in api.operations))
             self.assertFalse(any(item[0] == "create" for item in api.operations))
 
+    def test_stage_completion_can_be_queried_without_mutating_remote_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = _FakeApi()
+            api.remote_paths.add("runs/run-123/calibration-wide-v1/_SUCCESS.json")
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
+
+            self.assertTrue(uploader.stage_is_complete("calibration-wide-v1"))
+            self.assertFalse(uploader.stage_is_complete("grpo-hard"))
+            self.assertFalse(any(item[0] in {"batch", "sync"} for item in api.operations))
+
     def test_files_manifest_then_success_marker_are_uploaded_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -474,6 +485,19 @@ class ArtifactUploaderTests(unittest.TestCase):
                 local.parent.mkdir(parents=True, exist_ok=True)
                 local.write_text("{}", encoding="utf-8")
                 api.remote_paths.add(f"runs/run-123/{stage}/_SUCCESS.json")
+
+            self.assertTrue(uploader.complete_run({"stages": list(stages)}))
+            self.assertIn("runs/run-123/_SUCCESS.json", api.remote_paths)
+
+    def test_run_can_complete_from_verified_remote_stages_on_a_fresh_machine(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = _FakeApi()
+            stages = ("datasets", "calibration-wide-v1")
+            api.remote_paths.update(
+                f"runs/run-123/{stage}/_SUCCESS.json" for stage in stages
+            )
+            uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
 
             self.assertTrue(uploader.complete_run({"stages": list(stages)}))
             self.assertIn("runs/run-123/_SUCCESS.json", api.remote_paths)

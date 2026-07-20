@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -62,6 +63,8 @@ def generate_from_messages(
     *,
     num_return_sequences: int = 1,
     temperature: float = 0.0,
+    top_p: float = 1.0,
+    top_k: int = 0,
     max_new_tokens: int = 96,
 ) -> list[str]:
     """Generate raw completions for the exact serialized dataset prompt."""
@@ -70,8 +73,12 @@ def generate_from_messages(
         raise ValueError("num_return_sequences must be positive")
     if max_new_tokens < 1:
         raise ValueError("max_new_tokens must be positive")
-    if temperature < 0:
-        raise ValueError("temperature cannot be negative")
+    if not math.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and non-negative")
+    if not math.isfinite(top_p) or not 0 < top_p <= 1:
+        raise ValueError("top_p must be finite and in (0, 1]")
+    if top_k < 0:
+        raise ValueError("top_k cannot be negative")
     rendered = tokenizer.apply_chat_template(
         list(messages),
         tokenize=False,
@@ -91,6 +98,10 @@ def generate_from_messages(
     }
     if temperature > 0:
         generation["temperature"] = temperature
+        # Pass these explicitly so a model's bundled GenerationConfig cannot
+        # silently narrow the candidate token set during GRPO calibration.
+        generation["top_p"] = top_p
+        generation["top_k"] = top_k
     try:
         import torch
     except ImportError as exc:

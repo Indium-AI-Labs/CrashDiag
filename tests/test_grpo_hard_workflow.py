@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
 import threading
@@ -11,7 +12,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from training.calibrate_grpo import calibrate, select_calibration_rows, summarize_temperature
+from training.artifacts import ArtifactError
+from training.calibrate_grpo import (
+    calibrate,
+    main as calibrate_main,
+    select_calibration_rows,
+    summarize_temperature,
+)
 from training.common import FAULT_NAMES
 from training.evaluate_jsonl import summarize_results
 from training.grpo_gates import promotion_gate, smoke_gate
@@ -19,6 +26,19 @@ from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_hard_record
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_artifact_collision_returns_status_instead_of_raising_system_exit(self) -> None:
+        with (
+            patch(
+                "training.calibrate_grpo.uploader_from_args",
+                side_effect=ArtifactError("stage already complete"),
+            ),
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            status = calibrate_main([])
+
+        self.assertEqual(status, 2)
+        self.assertIn("stage already complete", stderr.getvalue())
+
     def test_calibration_slice_is_exactly_stratified(self) -> None:
         rows = generate_hard_records(
             samples_per_fault=9, seed=12, start_variation=0, split="train"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -359,6 +360,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-generations", type=int, default=4)
     parser.add_argument("--max-completion-length", type=int, default=96)
     parser.add_argument("--temperature", type=float, default=0.9)
+    parser.add_argument("--top-p", type=float, default=1.0)
+    parser.add_argument("--top-k", type=int, default=0)
     parser.add_argument("--beta", type=float, default=0.0)
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=50)
@@ -417,6 +420,10 @@ def _validate_positive(args: argparse.Namespace) -> None:
         raise SystemExit(f"these arguments must be positive: {', '.join(invalid)}")
     if args.num_generations < 2:
         raise SystemExit("--num-generations must be at least 2 for GRPO advantages")
+    if not math.isfinite(args.top_p) or not 0 < args.top_p <= 1:
+        raise SystemExit("--top-p must be finite and in (0, 1]")
+    if args.top_k < 0:
+        raise SystemExit("--top-k cannot be negative")
     if args.minimum_gate_steps < 1:
         raise SystemExit("--minimum-gate-steps must be positive")
     if args.require_nonzero_update and args.parent_reference is None:
@@ -566,6 +573,8 @@ def main(argv: list[str] | None = None) -> None:
         num_generations=args.num_generations,
         max_completion_length=args.max_completion_length,
         temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         beta=args.beta,
         bf16=bf16,
         fp16=fp16,

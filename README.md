@@ -109,9 +109,12 @@ hard notebook then performs, in order:
 
 1. signed download of the hard data, the exact parent SFT adapter, and the
    original schema-v1 evaluation file;
-2. 8-generation calibration at temperatures `0.9`, `1.2`, then `1.5`, with
-   eight concurrent isolated reward workers and visible per-group progress,
-   stopping at the first setting with usable mechanically measured variance;
+2. 8-generation calibration in the immutable `calibration-wide-v1` stage at
+   temperatures `1.8`, `2.1`, then `2.4`, with `top_p=1.0`, top-k filtering
+   disabled, eight concurrent isolated reward workers, and visible per-group
+   progress, stopping at the first setting with usable mechanically measured
+   variance; a rerun downloads and verifies the completed stage instead of
+   attempting to overwrite it;
 3. a 36-step smoke job that must show positive reward standard deviation,
    positive gradient norm, mixed success, zero backend errors, finite metrics,
    and an adapter SHA different from the parent;
@@ -394,7 +397,11 @@ schema version and replays every serialized prompt:
 ```bash
 python -m training.calibrate_grpo \
   --model /path/to/verified-sft \
-  --train-file data/grpo_hard_train.jsonl
+  --train-file data/grpo_hard_train.jsonl \
+  --temperatures 1.8 2.1 2.4 \
+  --top-p 1.0 \
+  --top-k 0 \
+  --artifact-stage calibration-wide-v1
 
 accelerate launch --module training.grpo \
   --model /path/to/verified-sft \
@@ -403,6 +410,8 @@ accelerate launch --module training.grpo \
   --num-generations 8 \
   --gradient-accumulation-steps 8 \
   --temperature <selected-temperature> \
+  --top-p 1.0 \
+  --top-k 0 \
   --beta 0.02 \
   --output-dir outputs/grpo-hard
 
@@ -622,12 +631,16 @@ Previously completed and audited outside this local test pass:
   `20260719T113724Z-dataset-b26381b116bc` and its held-out schema-v1 evaluation;
 - the earlier schema-v1 GRPO smoke, which correctly exposed a degenerate
   zero-loss/zero-gradient run and is not treated as a trained GRPO model.
+- the hard run's original immutable `calibration` stage, which failed the
+  variance gate: temperatures `0.9` and `1.2` had zero mixed groups, while
+  `1.5` had only one mixed group out of 36. It remains an audit artifact and
+  is not reused as evidence that GRPO is ready.
 
 Not run in this pass:
 
-- the new schema-v2 calibration, nonzero-update smoke, or full GRPO optimization
-  job, because model weights and the GPU training stack are not installed in
-  this local environment;
+- the broader `calibration-wide-v1` retry, nonzero-update smoke, or full GRPO
+  optimization job, because model weights and the GPU training stack are not
+  installed in this local environment;
 - a live vLLM inference/training process.
 - the hard-only notebook end-to-end on a Kaggle GPU; its current validation is
   structural and offline rather than a completed training claim;
