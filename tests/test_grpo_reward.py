@@ -86,6 +86,29 @@ class MechanicalRewardTests(unittest.TestCase):
 
         self.assertEqual(rewards, [1.0] * len(rows))
 
+    def test_dependency_repair_ignores_a_model_guessed_version(self) -> None:
+        row = build_hard_grpo_sample(
+            "dependency_mismatch",
+            base_seed=81,
+            variation_index=1,
+            split="train",
+        )
+        completion = (
+            '{"action":"fix_dependency","parameters":'
+            '{"name":"web-framework","version":"0.0.1-model-guess"}}'
+        )
+
+        rewards = mechanical_reward(
+            [completion],
+            fault_name=[row["fault_name"]],
+            sample_seed=[row["sample_seed"]],
+            prompts=[row["prompt"]],
+            scenario_schema_version=[row["scenario_schema_version"]],
+            scenario_profile=[row["scenario_profile"]],
+        )
+
+        self.assertEqual(rewards, [1.0])
+
     def test_schema_v2_prompt_profile_and_version_fail_closed(self) -> None:
         row = build_hard_grpo_sample(
             "disk_full", base_seed=44, variation_index=2, split="eval"

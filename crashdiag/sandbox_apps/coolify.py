@@ -92,7 +92,7 @@ class CoolifySandbox(SandboxBackend):
         name: str | None = None,
         version: str | None = None,
     ) -> dict[str, Any]:
-        """Restore a dependency, rebuild, and return observed action data."""
+        """Restore the declared dependency lock and return observed action data."""
 
         self._unimplemented("fix_dependency")
 

@@ -49,7 +49,7 @@ class SandboxBackend(ABC):
         name: str | None = None,
         version: str | None = None,
     ) -> dict[str, Any]:
-        """Restore one or all required dependency versions."""
+        """Restore declared versions; ``version`` is ignored for compatibility."""
 
     @abstractmethod
     def clear_disk(self, target_percent: float = 40.0) -> dict[str, Any]:
@@ -303,6 +303,8 @@ class MockSandbox(SandboxBackend):
         name: str | None = None,
         version: str | None = None,
     ) -> dict[str, Any]:
+        """Restore from the dependency lock, ignoring a requested version."""
+
         if name is not None and not isinstance(name, str):
             raise TypeError("dependency name must be a string or None")
         if version is not None and not isinstance(version, str):
@@ -315,7 +317,9 @@ class MockSandbox(SandboxBackend):
                     self.dependencies[dependency] = required
                     changed = True
         else:
-            desired = version if version is not None else self.required_dependencies.get(name)
+            # ``version`` remains accepted for wire/backward compatibility but
+            # is intentionally ignored. The deployment lock is authoritative.
+            desired = self.required_dependencies.get(name)
             if desired is None:
                 raise ValueError(f"no required version is known for {name!r}")
             if self.dependencies.get(name) != desired:

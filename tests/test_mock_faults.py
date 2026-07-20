@@ -87,6 +87,18 @@ class MockFaultTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MockSandbox().execute_action("run_shell", {"command": "whoami"})
 
+    def test_dependency_repair_uses_declared_version_not_requested_version(self) -> None:
+        sandbox = MockSandbox()
+        sandbox.set_dependency_version("web-framework", "9.9.9")
+
+        sandbox.fix_dependency("web-framework", "0.0.1-model-guess")
+
+        observation = sandbox.observe()
+        self.assertEqual(
+            observation["dependencies"]["installed"]["web-framework"],
+            observation["dependencies"]["required"]["web-framework"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,12 +112,12 @@ hard notebook then performs, in order:
 
 1. signed download of the hard data, the exact parent SFT adapter, and the
    original schema-v1 evaluation file;
-2. 8-generation calibration in the immutable `calibration-contract-v2` stage
-   at temperatures `1.5`, `1.6`, then `1.7`, with `top_p=0.9`, `top_k=50`,
-   eight concurrent isolated reward workers, and visible per-group progress.
-   It requires positive mechanical rewards for every fault family as well as
-   useful mixed groups; a rerun downloads and verifies the completed stage
-   instead of attempting to overwrite it;
+2. download and verify the signed completions from the immutable
+   `calibration-contract-v2` stage, then mechanically re-execute them under
+   the declarative dependency-repair contract into
+   `calibration-declarative-v3`. Recorded rewards are ignored, no model is
+   loaded, and the new gate requires positive rewards for every fault family
+   as well as useful mixed groups;
 3. a 36-step smoke job that must show positive reward standard deviation,
    positive gradient norm, mixed success, zero backend errors, finite metrics,
    and an adapter SHA different from the parent;
@@ -408,7 +408,10 @@ python -m training.calibrate_grpo \
   --temperatures 1.5 1.6 1.7 \
   --top-p 0.9 \
   --top-k 50 \
-  --artifact-stage calibration-contract-v2
+  --reuse-rollouts /verified/calibration-contract-v2/rollouts.jsonl \
+  --reuse-report /verified/calibration-contract-v2/calibration.json \
+  --source-rollout-stage calibration-contract-v2 \
+  --artifact-stage calibration-declarative-v3
 
 accelerate launch --module training.grpo \
   --model /path/to/verified-sft \
@@ -572,6 +575,9 @@ private Compose network and obtains TLS certificates automatically.
 | `port_proxy_misconfig` | easy | proxy and app ports differ | `fix_port_config` |
 
 `wait_and_observe` is the conservative fallback and changes no failure state.
+`fix_dependency` is declarative: the defensive action parser discards any
+model-supplied version and restores the deployment's pinned version. This
+prevents an LLM hallucination from selecting an arbitrary package version.
 
 ## Repository layout
 
@@ -645,13 +651,17 @@ Previously completed and audited outside this local test pass:
 - its immutable `calibration-wide-v1` retry, which found mixed groups at 1.8
   but dropped to 17.4% strict JSON and 11.5% mean reward; higher temperatures
   collapsed further. This exposed a mismatch between the parent SFT's
-  parameterized repair examples and the hidden-value hard action contract.
+  parameterized repair examples and the hidden-value hard action contract;
+- the curriculum-v2 `calibration-contract-v2` stage, which restored 98%+
+  strict JSON and healthy mixed-group rates but confirmed that every
+  dependency completion still supplied a hallucinated version. Its signed
+  completions are retained as input to a fresh mechanical rescore; its old
+  recorded rewards are never trusted.
 
 Not run in this pass:
 
-- the corrected curriculum-v2 calibration, nonzero-update smoke, or full GRPO
-  optimization job, because model weights and the GPU training stack are not
-  installed in this local environment;
+- the declarative dependency rescore, nonzero-update smoke, or full GRPO
+  optimization job;
 - a live vLLM inference/training process.
 - the hard-only notebook end-to-end on a Kaggle GPU; its current validation is
   structural and offline rather than a completed training claim;

@@ -70,6 +70,12 @@ def _validated_action(value: Any) -> dict[str, Any] | None:
     except (TypeError, ValueError, RecursionError):
         return None
 
+    # Dependency repair is deliberately declarative: the sandbox restores the
+    # version pinned by deployment configuration. Never execute a model-guessed
+    # package version, even when an older SFT policy emits one.
+    if action == "fix_dependency":
+        normalized_parameters = {}
+
     result: dict[str, Any] = {
         "action": action,
         "parameters": normalized_parameters,
@@ -87,6 +93,8 @@ def parse_action(content: Any) -> dict[str, Any]:
     Markdown JSON fence is also accepted.  Prose-wrapped or partially malformed
     objects are rejected rather than searching for an executable substring.
     Only a top-level object with an action from :data:`ACTION_SPACE` is accepted.
+    ``fix_dependency`` parameters are discarded so model-generated versions
+    can never override the deployment's declared dependency lock.
     """
 
     if isinstance(content, Mapping):

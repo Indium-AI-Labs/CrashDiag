@@ -18,6 +18,15 @@ class BlueAgentParserTests(unittest.TestCase):
             {"action": "restart_app", "parameters": {}},
         )
 
+    def test_dependency_versions_are_canonicalized_to_declarative_repair(self) -> None:
+        self.assertEqual(
+            parse_action(
+                '{"action":"fix_dependency","parameters":'
+                '{"name":"web-framework","version":"9.9.9"}}'
+            ),
+            {"action": "fix_dependency", "parameters": {}},
+        )
+
     def test_invalid_output_falls_back_to_wait(self) -> None:
         fallback = {"action": "wait_and_observe", "parameters": {}}
         cyclic_parameters: dict[str, object] = {}

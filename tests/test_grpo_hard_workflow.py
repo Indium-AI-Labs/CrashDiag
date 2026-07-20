@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from training.artifacts import ArtifactError
 from training.calibrate_grpo import (
+    build_rollout_replay_generator,
     calibrate,
     main as calibrate_main,
     select_calibration_rows,
@@ -26,6 +27,48 @@ from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_hard_record
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_signed_rollout_replay_ignores_recorded_rewards(self) -> None:
+        rows = generate_hard_records(
+            samples_per_fault=3, seed=17, start_variation=0, split="train"
+        )
+        selected = select_calibration_rows(rows, prompts_per_fault_profile=1)
+        rollouts = []
+        for prompt_index, row in enumerate(selected):
+            for generation_index, completion in enumerate(("first", "second")):
+                rollouts.append(
+                    {
+                        "temperature": 1.6,
+                        "prompt_index": prompt_index,
+                        "generation_index": generation_index,
+                        "fault_name": row["fault_name"],
+                        "scenario_profile": row["scenario_profile"],
+                        "sample_seed": row["sample_seed"],
+                        "completion": completion,
+                        "reward": 999.0,
+                    }
+                )
+        replay = build_rollout_replay_generator(
+            rows,
+            rollouts,
+            {
+                "num_generations": 2,
+                "prompts_per_fault_profile": 1,
+                "sampling": {
+                    "top_p": 0.9,
+                    "top_k": 50,
+                    "max_new_tokens": 48,
+                },
+            },
+            temperatures=[1.6],
+            num_generations=2,
+            prompts_per_fault_profile=1,
+            top_p=0.9,
+            top_k=50,
+            max_new_tokens=48,
+        )
+
+        self.assertEqual(replay(selected[0]["prompt"], 1.6, 2), ["first", "second"])
+
     def test_artifact_collision_returns_status_instead_of_raising_system_exit(self) -> None:
         with (
             patch(

@@ -44,6 +44,120 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
+def build_rollout_replay_generator(
+    rows: Sequence[Mapping[str, Any]],
+    rollouts: Sequence[Mapping[str, Any]],
+    source_report: Mapping[str, Any],
+    *,
+    temperatures: Sequence[float],
+    num_generations: int,
+    prompts_per_fault_profile: int,
+    top_p: float,
+    top_k: int,
+    max_new_tokens: int,
+) -> Callable[[Sequence[Mapping[str, str]], float, int], Sequence[str]]:
+    """Validate and replay completions from one signed calibration stage.
+
+    Recorded rewards are ignored. Callers pass the returned generator back to
+    :func:`calibrate`, which reconstructs every scenario and computes fresh
+    mechanical rewards under the current action contract.
+    """
+
+    sampling = source_report.get("sampling")
+    if not isinstance(sampling, Mapping):
+        raise ValueError("reused calibration report has no sampling metadata")
+    expected_sampling = {
+        "top_p": float(top_p),
+        "top_k": int(top_k),
+        "max_new_tokens": int(max_new_tokens),
+    }
+    actual_sampling = {
+        "top_p": float(sampling.get("top_p", -1.0)),
+        "top_k": int(sampling.get("top_k", -1)),
+        "max_new_tokens": int(sampling.get("max_new_tokens", -1)),
+    }
+    if actual_sampling != expected_sampling:
+        raise ValueError(
+            "reused calibration sampling mismatch: "
+            f"expected {expected_sampling}, found {actual_sampling}"
+        )
+    if int(source_report.get("num_generations", -1)) != num_generations:
+        raise ValueError("reused calibration generation count mismatch")
+    if (
+        int(source_report.get("prompts_per_fault_profile", -1))
+        != prompts_per_fault_profile
+    ):
+        raise ValueError("reused calibration prompt count mismatch")
+
+    selected = select_calibration_rows(
+        rows,
+        prompts_per_fault_profile=prompts_per_fault_profile,
+    )
+    prompt_indexes: dict[str, int] = {}
+    for index, row in enumerate(selected):
+        key = json.dumps(row["prompt"], sort_keys=True, separators=(",", ":"))
+        if key in prompt_indexes:
+            raise ValueError("calibration prompts must be unique for rollout replay")
+        prompt_indexes[key] = index
+
+    requested_temperatures = {float(value) for value in temperatures}
+    grouped: dict[tuple[float, int], list[tuple[int, str]]] = defaultdict(list)
+    for raw in rollouts:
+        temperature = float(raw.get("temperature", float("nan")))
+        if temperature not in requested_temperatures:
+            continue
+        prompt_index = int(raw.get("prompt_index", -1))
+        generation_index = int(raw.get("generation_index", -1))
+        if not 0 <= prompt_index < len(selected):
+            raise ValueError("reused rollout prompt index is out of range")
+        row = selected[prompt_index]
+        identity = (
+            str(raw.get("fault_name")),
+            str(raw.get("scenario_profile")),
+            int(raw.get("sample_seed", -1)),
+        )
+        expected_identity = (
+            str(row["fault_name"]),
+            str(row["scenario_profile"]),
+            int(row["sample_seed"]),
+        )
+        if identity != expected_identity:
+            raise ValueError("reused rollout scenario identity mismatch")
+        completion = raw.get("completion")
+        if not isinstance(completion, str):
+            raise ValueError("reused rollout completion must be a string")
+        grouped[(temperature, prompt_index)].append(
+            (generation_index, completion)
+        )
+
+    for temperature in requested_temperatures:
+        for prompt_index in range(len(selected)):
+            items = sorted(grouped[(temperature, prompt_index)])
+            if [index for index, _ in items] != list(range(num_generations)):
+                raise ValueError(
+                    "reused calibration group is missing or duplicates generations"
+                )
+
+    def generate_group(
+        messages: Sequence[Mapping[str, str]],
+        temperature: float,
+        count: int,
+    ) -> Sequence[str]:
+        if count != num_generations:
+            raise ValueError("reused calibration requested an unexpected group size")
+        key = json.dumps(list(messages), sort_keys=True, separators=(",", ":"))
+        try:
+            prompt_index = prompt_indexes[key]
+        except KeyError as exc:
+            raise ValueError("reused calibration received an unknown prompt") from exc
+        return [
+            completion
+            for _, completion in sorted(grouped[(float(temperature), prompt_index)])
+        ]
+
+    return generate_group
+
+
 def select_calibration_rows(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -304,6 +418,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-new-tokens", type=int, default=48)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
+    parser.add_argument("--reuse-rollouts", type=Path, default=None)
+    parser.add_argument("--reuse-report", type=Path, default=None)
+    parser.add_argument("--source-rollout-stage", default=None)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--sandbox-url", default=os.environ.get("CRASHDIAG_SANDBOX_URL", ""))
@@ -333,6 +450,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--top-p must be finite and in (0, 1]")
     if args.top_k < 0:
         parser.error("--top-k cannot be negative")
+    if (args.reuse_rollouts is None) != (args.reuse_report is None):
+        parser.error("--reuse-rollouts and --reuse-report must be provided together")
+    if args.reuse_rollouts is not None and not args.source_rollout_stage:
+        parser.error("reused rollouts require --source-rollout-stage provenance")
     try:
         uploader = uploader_from_args(args)
         if uploader is not None:
@@ -344,6 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "temperatures": args.temperatures,
                     "top_p": args.top_p,
                     "top_k": args.top_k,
+                    "source_rollout_stage": args.source_rollout_stage,
                     "mechanical_reward": True,
                 },
             )
@@ -353,23 +475,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=args.sandbox_timeout,
         )
         rows = read_jsonl(args.train_file)
-        model, tokenizer = load_local_policy(
-            args.model,
-            precision=args.precision,
-            trust_remote_code=args.trust_remote_code,
-        )
-
-        def generate_group(messages: Sequence[Mapping[str, str]], temperature: float, count: int) -> Sequence[str]:
-            return generate_from_messages(
-                model,
-                tokenizer,
-                messages,
-                num_return_sequences=count,
-                temperature=temperature,
+        if args.reuse_rollouts is not None:
+            try:
+                source_report = json.loads(
+                    args.reuse_report.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("invalid reused calibration report") from exc
+            if not isinstance(source_report, Mapping):
+                raise ValueError("reused calibration report must be an object")
+            generate_group = build_rollout_replay_generator(
+                rows,
+                read_jsonl(args.reuse_rollouts),
+                source_report,
+                temperatures=args.temperatures,
+                num_generations=args.num_generations,
+                prompts_per_fault_profile=args.prompts_per_fault_profile,
                 top_p=args.top_p,
                 top_k=args.top_k,
                 max_new_tokens=args.max_new_tokens,
             )
+        else:
+            model, tokenizer = load_local_policy(
+                args.model,
+                precision=args.precision,
+                trust_remote_code=args.trust_remote_code,
+            )
+
+            def generate_group(messages: Sequence[Mapping[str, str]], temperature: float, count: int) -> Sequence[str]:
+                return generate_from_messages(
+                    model,
+                    tokenizer,
+                    messages,
+                    num_return_sequences=count,
+                    temperature=temperature,
+                    top_p=args.top_p,
+                    top_k=args.top_k,
+                    max_new_tokens=args.max_new_tokens,
+                )
 
         report, rollouts = calibrate(
             rows,
@@ -384,6 +527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "top_p": args.top_p,
             "top_k": args.top_k,
             "max_new_tokens": args.max_new_tokens,
+            "source_rollout_stage": args.source_rollout_stage,
         }
         _write_outputs(args.output_dir, report, rollouts)
         if uploader is not None:

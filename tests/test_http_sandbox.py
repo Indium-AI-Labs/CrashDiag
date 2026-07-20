@@ -152,7 +152,12 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
                 sandbox.rollback_env_var("APP_ENV")
 
                 sandbox.set_dependency_version("web-framework", "0.0.1")
-                sandbox.fix_dependency("web-framework")
+                sandbox.fix_dependency("web-framework", "9.9.9-model-guess")
+                dependency_state = sandbox.observe()["dependencies"]
+                self.assertEqual(
+                    dependency_state["installed"]["web-framework"],
+                    dependency_state["required"]["web-framework"],
+                )
 
                 sandbox.set_disk_usage(99.0)
                 sandbox.clear_disk(40.0)

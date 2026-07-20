@@ -179,11 +179,11 @@ class HttpSandbox(SandboxBackend):
         name: str | None = None,
         version: str | None = None,
     ) -> dict[str, Any]:
+        """Restore the declared dependency lock without forwarding ``version``."""
+
         parameters: dict[str, Any] = {}
         if name is not None:
             parameters["name"] = name
-        if version is not None:
-            parameters["version"] = version
         return self._action("fix_dependency", parameters)
 
     def clear_disk(self, target_percent: float = 40.0) -> dict[str, Any]:
