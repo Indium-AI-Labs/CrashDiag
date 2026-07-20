@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 artifacts/
 outputs/
+/data/
 wandb/
 .venv/
 .env
