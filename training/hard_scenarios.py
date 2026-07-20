@@ -26,6 +26,7 @@ from .common import FAULT_NAMES, fault_for_name
 
 
 HARD_SCENARIO_SCHEMA_VERSION = 2
+HARD_CURRICULUM_VERSION = 2
 HARD_SCENARIO_PROFILES = ("redacted", "noisy", "shifted_noisy")
 HARD_SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
 Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
@@ -39,8 +40,9 @@ Choose exactly one action from this list:
 
 Reply with one JSON object only, using this schema:
 {"action": "<action name>", "parameters": {}}
-The parameters value must be a JSON object. When a desired configuration value is not observable,
-leave optional parameters out instead of guessing. Do not use markdown or prose.
+For this sandbox, each repair action restores its target from deployment history or declared
+configuration. The parameters value must therefore be exactly {}. Never guess or emit names,
+versions, ports, or thresholds. Do not use markdown or prose.
 """
 
 _APP_ENV_VALUES = ("production", "staging", "canary")
@@ -65,7 +67,8 @@ def hard_sample_seed(base_seed: int, fault_name: str, variation_index: int) -> i
     ):
         raise ValueError("variation_index must be a non-negative integer")
     material = (
-        f"crashdiag:hard-grpo:v{HARD_SCENARIO_SCHEMA_VERSION}:"
+        f"crashdiag:hard-grpo:schema{HARD_SCENARIO_SCHEMA_VERSION}:"
+        f"curriculum{HARD_CURRICULUM_VERSION}:"
         f"{base_seed}:{fault_name}:{variation_index}"
     ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") & (
@@ -370,10 +373,12 @@ def build_hard_grpo_sample(
         "sample_seed": scenario_seed,
         "variation_index": variation_index,
         "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+        "curriculum_version": HARD_CURRICULUM_VERSION,
         "scenario_profile": profile,
         "prompt": prompt,
         "metadata": {
             "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+            "curriculum_version": HARD_CURRICULUM_VERSION,
             "mechanically_validated": True,
             "split": split,
             "variation_index": variation_index,
@@ -412,6 +417,7 @@ def generate_hard_records(
 
 
 __all__ = [
+    "HARD_CURRICULUM_VERSION",
     "HARD_SCENARIO_PROFILES",
     "HARD_SCENARIO_SCHEMA_VERSION",
     "HARD_SYSTEM_PROMPT",

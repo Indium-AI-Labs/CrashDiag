@@ -32,6 +32,7 @@ from .artifacts import (
 from .common import FAULT_NAMES, write_jsonl
 from .generate_dataset import DEFAULT_DATASET_BUCKET
 from .hard_scenarios import (
+    HARD_CURRICULUM_VERSION,
     HARD_SCENARIO_PROFILES,
     HARD_SCENARIO_SCHEMA_VERSION,
     generate_hard_records,
@@ -214,6 +215,8 @@ def generate_hard_datasets(
 
     summary: dict[str, Any] = {
         "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+        "curriculum_version": HARD_CURRICULUM_VERSION,
+        "action_contract": "parameter_free_repairs",
         "curriculum": "grpo-hard-only",
         "seed": seed,
         "mechanically_validated": True,
@@ -300,6 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "source_commit": source_commit,
                     "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+                    "curriculum_version": HARD_CURRICULUM_VERSION,
                     "parent_sft": parent,
                 },
             )
@@ -327,6 +331,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 metadata={
                     "source_commit": source_commit,
                     "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+                    "curriculum_version": HARD_CURRICULUM_VERSION,
+                    "action_contract": summary["action_contract"],
                     "train_rows": summary["train"]["rows"],
                     "eval_rows": summary["eval"]["rows"],
                     "parent_sft": parent,

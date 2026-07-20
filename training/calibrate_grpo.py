@@ -107,6 +107,11 @@ def summarize_temperature(
         str(groups[index][0]["fault_name"])
         for index in mixed_groups
     }
+    positive_faults = {
+        str(item["fault_name"])
+        for item in rollouts
+        if float(item["reward"]) > 0.0
+    }
     mean_reward = sum(rewards) / len(rewards)
     mixed_group_rate = len(mixed_groups) / len(groups)
     gates = {
@@ -116,6 +121,7 @@ def summarize_temperature(
         "mean_reward_ceiling": mean_reward <= max_mean_reward,
         "mixed_group_rate": mixed_group_rate >= min_mixed_group_rate,
         "mixed_fault_families": len(mixed_faults) >= min_mixed_fault_families,
+        "positive_reward_all_fault_families": positive_faults == set(FAULT_NAMES),
     }
     per_fault: dict[str, Any] = {}
     for fault in FAULT_NAMES:
@@ -139,6 +145,7 @@ def summarize_temperature(
         "mixed_groups": len(mixed_groups),
         "mixed_group_rate": mixed_group_rate,
         "mixed_fault_families": sorted(mixed_faults),
+        "positive_reward_fault_families": sorted(positive_faults),
         "per_fault": per_fault,
     }
 

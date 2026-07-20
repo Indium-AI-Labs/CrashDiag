@@ -70,6 +70,35 @@ class CalibrationTests(unittest.TestCase):
         result = summarize_temperature(rollouts, expected_group_size=8)
         self.assertTrue(result["passed"])
         self.assertEqual(len(result["mixed_fault_families"]), 4)
+        self.assertEqual(
+            set(result["positive_reward_fault_families"]),
+            set(FAULT_NAMES),
+        )
+
+    def test_variance_gate_rejects_a_fault_family_with_no_positive_rollout(self) -> None:
+        rollouts = []
+        prompt_index = 0
+        for fault_index, fault in enumerate(FAULT_NAMES):
+            for _ in range(2):
+                for generation in range(8):
+                    reward = 1.0 if generation < 4 else 0.0
+                    if fault_index == len(FAULT_NAMES) - 1:
+                        reward = 0.0
+                    rollouts.append(
+                        {
+                            "prompt_index": prompt_index,
+                            "fault_name": fault,
+                            "reward": reward,
+                            "strict_json": True,
+                            "backend_error": False,
+                        }
+                    )
+                prompt_index += 1
+
+        result = summarize_temperature(rollouts, expected_group_size=8)
+
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["gates"]["positive_reward_all_fault_families"])
 
     def test_calibration_scores_each_generation_concurrently(self) -> None:
         rows = generate_hard_records(

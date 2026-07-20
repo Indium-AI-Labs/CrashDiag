@@ -8,6 +8,7 @@ from collections import Counter
 
 from training.common import FAULT_NAMES
 from training.hard_scenarios import (
+    HARD_CURRICULUM_VERSION,
     HARD_SCENARIO_PROFILES,
     build_hard_grpo_sample,
     generate_hard_records,
@@ -30,6 +31,10 @@ class HardScenarioTests(unittest.TestCase):
                         profile,
                     )
                     prompt = hard_observation_messages(sandbox.observe())
+                    self.assertIn(
+                        "parameters value must therefore be exactly {}",
+                        prompt[0]["content"],
+                    )
                     text = prompt[1]["content"]
                     for forbidden in (
                         '"failures"',
@@ -82,6 +87,11 @@ class HardScenarioTests(unittest.TestCase):
             self.assertNotIn('"answer"', serialized)
             self.assertNotIn('"target"', serialized)
             self.assertEqual(row["scenario_schema_version"], 2)
+            self.assertEqual(row["curriculum_version"], HARD_CURRICULUM_VERSION)
+            self.assertEqual(
+                row["metadata"]["curriculum_version"],
+                HARD_CURRICULUM_VERSION,
+            )
             self.assertTrue(row["metadata"]["mechanically_validated"])
 
     def test_shifted_profile_changes_hidden_configuration_without_leaking_it(self) -> None:

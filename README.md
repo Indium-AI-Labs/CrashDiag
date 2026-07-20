@@ -92,6 +92,9 @@ The defaults write and upload 768 `grpo_hard_train.jsonl` rows and 192
 SHAs separate lets a performance-only trainer fix consume an already signed,
 unchanged dataset without weakening dataset provenance.
 
+Generated `data/` files are intentionally ignored by Git. The signed private
+HF bucket stage—not the repository—is the dataset system of record.
+
 Before running the notebook, update the Vultr checkout because schema-v2 uses
 new setup-only sandbox mutations and advertises supported scenario versions:
 
@@ -109,12 +112,12 @@ hard notebook then performs, in order:
 
 1. signed download of the hard data, the exact parent SFT adapter, and the
    original schema-v1 evaluation file;
-2. 8-generation calibration in the immutable `calibration-wide-v1` stage at
-   temperatures `1.8`, `2.1`, then `2.4`, with `top_p=1.0`, top-k filtering
-   disabled, eight concurrent isolated reward workers, and visible per-group
-   progress, stopping at the first setting with usable mechanically measured
-   variance; a rerun downloads and verifies the completed stage instead of
-   attempting to overwrite it;
+2. 8-generation calibration in the immutable `calibration-contract-v2` stage
+   at temperatures `1.5`, `1.6`, then `1.7`, with `top_p=0.9`, `top_k=50`,
+   eight concurrent isolated reward workers, and visible per-group progress.
+   It requires positive mechanical rewards for every fault family as well as
+   useful mixed groups; a rerun downloads and verifies the completed stage
+   instead of attempting to overwrite it;
 3. a 36-step smoke job that must show positive reward standard deviation,
    positive gradient norm, mixed success, zero backend errors, finite metrics,
    and an adapter SHA different from the parent;
@@ -352,6 +355,10 @@ This writes:
 - `data/grpo_train.jsonl`: 768 answer-free prompts;
 - `data/grpo_eval.jsonl`: 96 answer-free prompts.
 
+The entire `data/` directory is generated, ignored by Git, and uploaded to the
+private bucket with a signed manifest. Regenerate or download it before using
+the direct CLI examples below.
+
 Each SFT target is executed against a fresh sandbox before it is written.
 Regeneration with the same arguments is byte-deterministic; artifact run IDs
 remain unique so unrelated uploads never share a mutable prefix.
@@ -398,10 +405,10 @@ schema version and replays every serialized prompt:
 python -m training.calibrate_grpo \
   --model /path/to/verified-sft \
   --train-file data/grpo_hard_train.jsonl \
-  --temperatures 1.8 2.1 2.4 \
-  --top-p 1.0 \
-  --top-k 0 \
-  --artifact-stage calibration-wide-v1
+  --temperatures 1.5 1.6 1.7 \
+  --top-p 0.9 \
+  --top-k 50 \
+  --artifact-stage calibration-contract-v2
 
 accelerate launch --module training.grpo \
   --model /path/to/verified-sft \
@@ -410,8 +417,8 @@ accelerate launch --module training.grpo \
   --num-generations 8 \
   --gradient-accumulation-steps 8 \
   --temperature <selected-temperature> \
-  --top-p 1.0 \
-  --top-k 0 \
+  --top-p 0.9 \
+  --top-k 50 \
   --beta 0.02 \
   --output-dir outputs/grpo-hard
 
@@ -630,15 +637,19 @@ Previously completed and audited outside this local test pass:
 - the parent SFT adapter run
   `20260719T113724Z-dataset-b26381b116bc` and its held-out schema-v1 evaluation;
 - the earlier schema-v1 GRPO smoke, which correctly exposed a degenerate
-  zero-loss/zero-gradient run and is not treated as a trained GRPO model.
+  zero-loss/zero-gradient run and is not treated as a trained GRPO model;
 - the hard run's original immutable `calibration` stage, which failed the
   variance gate: temperatures `0.9` and `1.2` had zero mixed groups, while
   `1.5` had only one mixed group out of 36. It remains an audit artifact and
-  is not reused as evidence that GRPO is ready.
+  is not reused as evidence that GRPO is ready;
+- its immutable `calibration-wide-v1` retry, which found mixed groups at 1.8
+  but dropped to 17.4% strict JSON and 11.5% mean reward; higher temperatures
+  collapsed further. This exposed a mismatch between the parent SFT's
+  parameterized repair examples and the hidden-value hard action contract.
 
 Not run in this pass:
 
-- the broader `calibration-wide-v1` retry, nonzero-update smoke, or full GRPO
+- the corrected curriculum-v2 calibration, nonzero-update smoke, or full GRPO
   optimization job, because model weights and the GPU training stack are not
   installed in this local environment;
 - a live vLLM inference/training process.
