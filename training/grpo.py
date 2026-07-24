@@ -468,11 +468,18 @@ def _reuse_completed_smoke_stage(uploader: Any, args: argparse.Namespace) -> boo
     ):
         return False
     output_dir = Path(args.output_dir)
-    uploader.download_stage(
-        args.artifact_stage,
-        output_dir,
-        include_paths=_SMOKE_HANDOFF_PATHS,
-    )
+    if output_dir.exists() and any(output_dir.iterdir()):
+        uploader.verify_local_stage(
+            output_dir,
+            args.artifact_stage,
+            include_paths=_SMOKE_HANDOFF_PATHS,
+        )
+    else:
+        uploader.download_stage(
+            args.artifact_stage,
+            output_dir,
+            include_paths=_SMOKE_HANDOFF_PATHS,
+        )
     try:
         gate = json.loads(
             (output_dir / "reports" / "smoke_gate.json").read_text(encoding="utf-8")
