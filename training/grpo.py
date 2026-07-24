@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -449,7 +450,7 @@ def _validate_positive(args: argparse.Namespace) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     preload_env(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -468,7 +469,8 @@ def main(argv: list[str] | None = None) -> None:
                 },
             )
     except ArtifactError as exc:
-        parser.exit(2, f"GRPO artifact error: {exc}\n")
+        print(f"GRPO artifact error: {exc}", file=sys.stderr)
+        return 2
 
     train_path = Path(args.train_file)
     if not train_path.is_file():
@@ -659,7 +661,8 @@ def main(argv: list[str] | None = None) -> None:
             },
         )
     trainer.accelerator.wait_for_everyone()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

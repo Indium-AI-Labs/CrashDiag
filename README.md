@@ -666,16 +666,20 @@ Previously completed and audited outside this local test pass:
   reward, `98.61%` strict JSON, mixed rewards in `10/36` prompt groups, positive
   rewards in all six fault families, and a `0%` backend error rate. The report,
   rollout log, SVG, manifest, and success marker were downloaded again and
-  hash-verified after upload.
+  hash-verified after upload;
+- the signed `grpo-hard-smoke` stage, which completed all 36 steps with a `0%`
+  backend error rate, a maximum reward standard deviation of `0.5123`, a
+  maximum gradient norm of `8.1929`, mixed success rates, finite metrics, and
+  an adapter SHA different from its verified SFT parent. The hard notebook
+  reuses and verifies this immutable passing stage instead of rerunning it.
 
 Not run in this pass:
 
-- the nonzero-update GRPO smoke or full GRPO optimization job;
-- a live vLLM inference/training process.
-- the hard-only notebook end-to-end on a Kaggle GPU; its current validation is
-  structural and offline rather than a completed training claim;
-- reports from a real Kaggle optimization job have therefore not yet been
-  visually inspected or confirmed in the live bucket;
+- the full GRPO optimization job;
+- a live vLLM inference/training process;
+- the hard-only notebook beyond its completed Kaggle smoke stage;
+- reports from a full Kaggle optimization job have therefore not yet been
+  inspected or confirmed in the live bucket;
 - a live Vultr HTTPS deployment from this development machine.
 
 Still stubbed/future work:

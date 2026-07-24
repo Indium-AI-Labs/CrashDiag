@@ -24,6 +24,7 @@ from training.common import FAULT_NAMES
 from training.evaluate_jsonl import summarize_results
 from training.grpo_gates import promotion_gate, smoke_gate
 from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_hard_records
+from training.grpo import main as grpo_main
 
 
 class CalibrationTests(unittest.TestCase):
@@ -78,6 +79,19 @@ class CalibrationTests(unittest.TestCase):
             patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
             status = calibrate_main([])
+
+        self.assertEqual(status, 2)
+        self.assertIn("stage already complete", stderr.getvalue())
+
+    def test_grpo_artifact_collision_returns_status_instead_of_system_exit(self) -> None:
+        with (
+            patch(
+                "training.grpo.uploader_from_args",
+                side_effect=ArtifactError("stage already complete"),
+            ),
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            status = grpo_main([])
 
         self.assertEqual(status, 2)
         self.assertIn("stage already complete", stderr.getvalue())
