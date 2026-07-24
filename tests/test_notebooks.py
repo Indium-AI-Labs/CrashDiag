@@ -173,6 +173,8 @@ class NotebookWorkflowTests(unittest.TestCase):
             '"--minimum-gate-steps", str(SMOKE_STEPS)',
             'smoke_gate.get("passed") is not True',
             '"--model", str(PARENT_SFT_DIR)',
+            "full_exit = grpo_main(full_args)",
+            'raise RuntimeError(f"full GRPO process failed with status {full_exit}")',
             "evaluate_jsonl_main",
             '"hard-evaluation"',
             '"regression-evaluation"',
