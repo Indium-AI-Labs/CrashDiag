@@ -137,6 +137,7 @@ class NotebookWorkflowTests(unittest.TestCase):
         required = (
             "PASTE_HARD_GRPO_RUN_ID_HERE",
             "PASTE_TRAINER_COMMIT_HERE",
+            'WORKFLOW_VERSION = "hard-grpo-signed-resume-v3"',
             "training.generate_grpo_hard",
             'required_secret("HF_TOKEN")',
             'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
@@ -155,7 +156,8 @@ class NotebookWorkflowTests(unittest.TestCase):
             "uploader.stage_is_complete(CALIBRATION_STAGE)",
             'SMOKE_STAGE = "grpo-hard-smoke"',
             "uploader.stage_is_complete(SMOKE_STAGE)",
-            "Reusing completed immutable stage: {SMOKE_STAGE}",
+            "SMOKE_RESTORED_FROM_SIGNED_HF_STAGE=true",
+            "SMOKE_GATE_VERIFIED=true",
             '"reports/smoke_gate.json"',
             '"1.5", "1.6", "1.7"',
             '"--top-p", "0.9"',
