@@ -43,6 +43,14 @@ _SANDBOX_TOKEN = os.environ.get("CRASHDIAG_API_TOKEN") or os.environ.get(
     "CRASHDIAG_SANDBOX_TOKEN"
 )
 _SANDBOX_TIMEOUT = 15.0
+_SMOKE_HANDOFF_PATHS = (
+    "reports/smoke_gate.json",
+    "reports/gradient_norm.svg",
+    "reports/learning_rate.svg",
+    "reports/loss.svg",
+    "reports/policy_diagnostics.svg",
+    "reports/reward.svg",
+)
 
 
 def configure_reward_backend(
@@ -450,12 +458,46 @@ def _validate_positive(args: argparse.Namespace) -> None:
         )
 
 
+def _reuse_completed_smoke_stage(uploader: Any, args: argparse.Namespace) -> bool:
+    """Restore a signed passing smoke handoff for idempotent notebook reruns."""
+
+    if (
+        uploader is None
+        or not args.require_nonzero_update
+        or not uploader.stage_is_complete(args.artifact_stage)
+    ):
+        return False
+    output_dir = Path(args.output_dir)
+    uploader.download_stage(
+        args.artifact_stage,
+        output_dir,
+        include_paths=_SMOKE_HANDOFF_PATHS,
+    )
+    try:
+        gate = json.loads(
+            (output_dir / "reports" / "smoke_gate.json").read_text(encoding="utf-8")
+        )
+        parent = json.loads(Path(args.parent_reference).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ArtifactError("completed smoke handoff is invalid") from exc
+    if not isinstance(gate, dict) or gate.get("passed") is not True:
+        raise ArtifactError("completed smoke handoff did not pass its gate")
+    if (
+        not isinstance(parent, dict)
+        or gate.get("parent_adapter_sha256") != parent.get("adapter_sha256")
+    ):
+        raise ArtifactError("completed smoke handoff has a different SFT parent")
+    print(f"Reusing completed immutable stage: {args.artifact_stage}")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     preload_env(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_positive(args)
 
+    uploader = None
     try:
         uploader = uploader_from_args(args)
         if uploader is not None and process_is_world_zero():
@@ -469,6 +511,12 @@ def main(argv: list[str] | None = None) -> int:
                 },
             )
     except ArtifactError as exc:
+        try:
+            if _reuse_completed_smoke_stage(uploader, args):
+                return 0
+        except ArtifactError as reuse_exc:
+            print(f"GRPO artifact error: {reuse_exc}", file=sys.stderr)
+            return 2
         print(f"GRPO artifact error: {exc}", file=sys.stderr)
         return 2
 

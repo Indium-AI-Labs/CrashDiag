@@ -96,6 +96,60 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertIn("stage already complete", stderr.getvalue())
 
+    def test_grpo_completed_smoke_is_downloaded_and_parent_verified(self) -> None:
+        class CompletedSmokeUploader:
+            def start_stage(self, stage: str, metadata: object) -> None:
+                raise ArtifactError("stage already complete")
+
+            @staticmethod
+            def stage_is_complete(stage: str) -> bool:
+                return stage == "grpo-hard-smoke"
+
+            @staticmethod
+            def download_stage(
+                stage: str,
+                destination: str | Path,
+                *,
+                include_paths: object,
+            ) -> None:
+                target = Path(destination) / "reports"
+                target.mkdir(parents=True)
+                (target / "smoke_gate.json").write_text(
+                    json.dumps(
+                        {
+                            "passed": True,
+                            "parent_adapter_sha256": "verified-parent",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "parent.json"
+            parent.write_text(
+                json.dumps({"adapter_sha256": "verified-parent"}),
+                encoding="utf-8",
+            )
+            with patch(
+                "training.grpo.uploader_from_args",
+                return_value=CompletedSmokeUploader(),
+            ):
+                status = grpo_main(
+                    [
+                        "--artifact-stage",
+                        "grpo-hard-smoke",
+                        "--output-dir",
+                        str(root / "smoke"),
+                        "--require-nonzero-update",
+                        "--parent-reference",
+                        str(parent),
+                    ]
+                )
+
+            self.assertEqual(status, 0)
+            self.assertTrue((root / "smoke/reports/smoke_gate.json").is_file())
+
     def test_calibration_slice_is_exactly_stratified(self) -> None:
         rows = generate_hard_records(
             samples_per_fault=9, seed=12, start_variation=0, split="train"
