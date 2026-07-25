@@ -16,6 +16,7 @@ NOTEBOOKS = {
     "grpo": ROOT / "notebooks" / "grpo.ipynb",
     "grpo_hard": ROOT / "notebooks" / "grpo_hard.ipynb",
     "eval": ROOT / "notebooks" / "eval.ipynb",
+    "eval_parent_hard": ROOT / "notebooks" / "eval_parent_sft_hard.ipynb",
 }
 
 
@@ -123,14 +124,17 @@ class NotebookWorkflowTests(unittest.TestCase):
         sft_notebook = _load(NOTEBOOKS["sft"])
         grpo_notebook = _load(NOTEBOOKS["grpo"])
         eval_notebook = _load(NOTEBOOKS["eval"])
+        parent_hard_notebook = _load(NOTEBOOKS["eval_parent_hard"])
         hard_notebook = _load(NOTEBOOKS["grpo_hard"])
         cls.sft = _source(sft_notebook)
         cls.grpo = _source(grpo_notebook)
         cls.eval = _source(eval_notebook)
+        cls.eval_parent_hard = _source(parent_hard_notebook)
         cls.grpo_hard = _source(hard_notebook)
         cls.sft_code = _code_source(sft_notebook)
         cls.grpo_code = _code_source(grpo_notebook)
         cls.eval_code = _code_source(eval_notebook)
+        cls.eval_parent_hard_code = _code_source(parent_hard_notebook)
         cls.grpo_hard_code = _code_source(hard_notebook)
 
     def test_hard_grpo_notebook_enforces_calibration_smoke_and_promotion(self) -> None:
@@ -312,6 +316,48 @@ class NotebookWorkflowTests(unittest.TestCase):
         self.assertLess(
             self.eval.index("mechanical_reward("),
             self.eval.index("uploader.upload_files("),
+        )
+
+    def test_parent_sft_hard_baseline_is_exact_signed_and_comparable(self) -> None:
+        required = (
+            'WORKFLOW_VERSION = "parent-sft-hard-baseline-v1"',
+            'HARD_RUN_ID = os.environ.get("CRASHDIAG_HARD_RUN_ID")',
+            'HARD_SOURCE_COMMIT = os.environ.get("CRASHDIAG_HARD_SOURCE_COMMIT")',
+            'EVALUATOR_COMMIT = os.environ.get("CRASHDIAG_EVALUATOR_COMMIT")',
+            'BASELINE_STAGE = "parent-sft-hard-evaluation"',
+            'COMPARISON_STAGE = "grpo-v1-comparison"',
+            "EXPECTED_ROWS = 192",
+            'required_secret("HF_TOKEN")',
+            'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
+            '"grpo_hard_eval.jsonl"',
+            '"parent_sft.json"',
+            "from training.calibrate_grpo import read_jsonl",
+            'hard_manifest.get("runtime", {}).get("git_commit") != HARD_SOURCE_COMMIT',
+            'hard_summary.get("action_contract") != "parameter_free_repairs"',
+            "read_parent_reference",
+            'service.get("scenario_schema_versions"',
+            "evaluate_jsonl_main",
+            '"--model", str(PARENT_SFT_DIR)',
+            '"--dataset", str(HARD_EVAL_FILE)',
+            '"hard-evaluation"',
+            '"absolute_delta"',
+            "baseline_uploader.upload_files(",
+            "baseline_uploader.complete_run(",
+            '"stages": [BASELINE_STAGE, COMPARISON_STAGE]',
+            "display(SVG(filename=str(chart)))",
+        )
+        for marker in required:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.eval_parent_hard)
+        self.assertNotIn("grpo_main", self.eval_parent_hard)
+        self.assertNotIn("sft_main", self.eval_parent_hard)
+        self.assertLess(
+            self.eval_parent_hard.index("read_parent_reference"),
+            self.eval_parent_hard.index("evaluate_jsonl_main(["),
+        )
+        self.assertLess(
+            self.eval_parent_hard.index("evaluate_jsonl_main(["),
+            self.eval_parent_hard.index("baseline_uploader.upload_files("),
         )
 
     def test_inter_notebook_contract_is_bucket_and_run_id_not_local_state(self) -> None:
