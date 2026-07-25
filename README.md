@@ -131,6 +131,44 @@ Every stage uploads JSON reports and SVG graphs to the same private hard-run
 prefix. If calibration, smoke, evaluation, or promotion fails, the notebook
 raises and never writes the run-level `_SUCCESS.json`.
 
+### CrashDiag GRPO v1 research candidate and exact SFT baseline
+
+The completed hard run is packaged as the immutable private-bucket research
+candidate:
+
+```text
+hf://buckets/devaanshpa/CrashDiag/models/crashdiag-grpo-v1-candidate
+```
+
+Its signed `model` stage contains the inference adapter, tokenizer, model card,
+provenance manifests, and mechanically generated evaluation reports. The
+adapter SHA-256 is
+`b9fbbd6410fa1e09a7d795cef27a45f304df705ae8fa493cba1c2ab88fec554c`.
+The candidate resolved 175/192 hard episodes (91.15%), resolved 96/96 original
+schema-v1 episodes, and passed the configured promotion gates. This remains a
+research candidate because validation uses `MockSandbox`, the port-action
+contract still needs tightening, and the exact parent-SFT hard baseline has
+not yet been run.
+
+Run [`notebooks/eval_parent_sft_hard.ipynb`](notebooks/eval_parent_sft_hard.ipynb)
+from top to bottom in a fresh Kaggle GPU session with Internet enabled and the
+`HF_TOKEN` and `CRASHDIAG_SANDBOX_TOKEN` secrets attached. Its checked-in
+defaults deliberately pin:
+
+- hard dataset/run `20260720T164228Z-grpo-hard-7aa31d7f3710`;
+- dataset source commit `f732e5fed815a73a53c8ee860c3fd865a6577fb2`;
+- the original evaluator/trainer commit
+  `1df32f6904585768c6e929a43b7eaa96974c0c67`; and
+- baseline artifact run
+  `20260720T164228Z-parent-sft-hard-baseline-7aa31d7f3710`.
+
+The notebook verifies the signed hard split and signed parent SFT adapter,
+evaluates that adapter deterministically against all 192 identical rows, and
+executes every proposed action on the live authenticated Vultr sandbox. It
+then downloads the signed GRPO summary, writes the overall and per-fault
+absolute deltas, and uploads both the baseline and comparison as immutable
+signed stages. No LLM judges either model.
+
 ### Original SFT and schema-v1 workflow
 
 The supported workflow has one CPU data phase followed by two fresh Kaggle GPU
@@ -589,6 +627,9 @@ prevents an LLM hallucination from selecting an arbitrary package version.
 - `notebooks/grpo_hard.ipynb`: hard-only Kaggle pipeline with automatic
   calibration, smoke/full training, two exact evaluations, graphs, private
   uploads, and fail-closed promotion.
+- `notebooks/eval_parent_sft_hard.ipynb`: independent exact 192-row hard
+  evaluation of the signed parent SFT adapter plus a signed SFT-versus-GRPO-v1
+  comparison.
 - `crashdiag/`: core environment, agents, verifier, and sandbox backends.
 - `training/generate_dataset.py`: deterministic dataset construction plus
   automatic private-bucket upload and handoff identifiers.
@@ -671,15 +712,20 @@ Previously completed and audited outside this local test pass:
   backend error rate, a maximum reward standard deviation of `0.5123`, a
   maximum gradient norm of `8.1929`, mixed success rates, finite metrics, and
   an adapter SHA different from its verified SFT parent. The hard notebook
-  reuses and verifies this immutable passing stage instead of rerunning it.
+  reused and verified this immutable passing stage instead of rerunning it;
+- the full hard GRPO optimization and its exact evaluations: 175/192
+  mechanically resolved hard episodes (91.15%), including at least 62.5% in
+  every fault family, plus 96/96 mechanically resolved schema-v1 regression
+  episodes and zero backend errors;
+- the passed signed promotion stage and immutable
+  `crashdiag-grpo-v1-candidate` private-bucket package. Its signed adapter was
+  downloaded again after upload and its SHA-256 matched exactly.
 
 Not run in this pass:
 
-- the full GRPO optimization job;
+- the exact 192-row parent-SFT hard baseline needed to attribute the observed
+  candidate performance specifically to GRPO;
 - a live vLLM inference/training process;
-- the hard-only notebook beyond its completed Kaggle smoke stage;
-- reports from a full Kaggle optimization job have therefore not yet been
-  inspected or confirmed in the live bucket;
 - a live Vultr HTTPS deployment from this development machine.
 
 Still stubbed/future work:
