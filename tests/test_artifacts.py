@@ -259,6 +259,9 @@ class ArtifactUploaderTests(unittest.TestCase):
             (output / "adapter_config.json").write_text("{}", encoding="utf-8")
             (output / "adapter_model.safetensors").write_bytes(b"signed-adapter")
             (checkpoint / "optimizer.pt").write_bytes(b"large-checkpoint")
+            provenance = output / "provenance"
+            provenance.mkdir()
+            (provenance / "_RUN_SUCCESS.json").write_text("{}", encoding="utf-8")
             api = _FakeApi()
             uploader = ArtifactUploader(self._config(root / "metadata"), api=api)
             uploader.upload_directory(output, "sft")

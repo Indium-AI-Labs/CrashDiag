@@ -31,6 +31,7 @@ DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_ARTIFACT_PREFIX = "runs"
 UPLOAD_POLICIES = ("required", "best-effort", "disabled")
 _SAFE_PATH_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SAFE_MANIFEST_PATH_PART = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SECRET_KEY = re.compile(
     r"token|secret|password|api[_-]?key|access[_-]?key|authorization|cookie|credential|private[_-]?key|bearer",
@@ -952,7 +953,7 @@ class ArtifactUploader:
         if any(
             not part
             or part in {".", ".."}
-            or not _SAFE_PATH_PART.fullmatch(part)
+            or not _SAFE_MANIFEST_PATH_PART.fullmatch(part)
             for part in parts
         ):
             raise ArtifactError(f"invalid stage include path: {value!r}")
