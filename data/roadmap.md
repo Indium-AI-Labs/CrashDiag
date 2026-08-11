@@ -49,23 +49,23 @@ Copy the printed `RUN_ID` and `SOURCE_COMMIT`. The signed dataset stage contains
 
 ## 3. Evaluate base Qwen 3B
 
-Open `notebooks/eval_base_qwen_hard.ipynb` in a fresh Kaggle GPU session. Set:
+Open `notebooks/qwen2.5_3b_instruct/eval_base.ipynb` in a fresh Kaggle GPU session. Set:
 
 ```text
 CRASHDIAG_DATASET_RUN_ID=<dataset RUN_ID>
 CRASHDIAG_DATASET_SOURCE_COMMIT=<dataset SOURCE_COMMIT>
-CRASHDIAG_BASE_QWEN_RUN_ID=<new unique base-eval ID>
+CRASHDIAG_BASE_EVAL_RUN_ID=<optional override; otherwise generated in IST>
 ```
 
 Run all cells. It uploads a signed `base-qwen-evaluation` result for the exact 96 rows.
 
 ## 4. Train and evaluate SFT
 
-Run `notebooks/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it now uses Qwen 2.5 3B. Download its signed adapter and evaluate it with `training.evaluate_jsonl` on the same `grpo_eval.jsonl`, temperature zero and `--max-new-tokens 96`, into a new evaluation-only run.
+Run `notebooks/qwen2.5_3b_instruct/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it uses Qwen 2.5 3B. Then run `notebooks/qwen2.5_3b_instruct/eval_sft.ipynb` against the same `grpo_eval.jsonl`.
 
 ## 5. Train and evaluate GRPO
 
-Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/grpo_hard.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
+Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
 
 ## 6. Compare
 

@@ -150,25 +150,6 @@ research candidate because validation uses `MockSandbox`, the port-action
 contract still needs tightening, and the exact parent-SFT hard baseline has
 not yet been run.
 
-Run [`notebooks/eval_parent_sft_hard.ipynb`](notebooks/eval_parent_sft_hard.ipynb)
-from top to bottom in a fresh Kaggle GPU session with Internet enabled and the
-`HF_TOKEN` and `CRASHDIAG_SANDBOX_TOKEN` secrets attached. Its checked-in
-defaults deliberately pin:
-
-- hard dataset/run `20260720T164228Z-grpo-hard-7aa31d7f3710`;
-- dataset source commit `f732e5fed815a73a53c8ee860c3fd865a6577fb2`;
-- the original evaluator/trainer commit
-  `1df32f6904585768c6e929a43b7eaa96974c0c67`; and
-- baseline artifact run
-  `20260720T164228Z-parent-sft-hard-baseline-7aa31d7f3710`.
-
-The notebook verifies the signed hard split and signed parent SFT adapter,
-evaluates that adapter deterministically against all 192 identical rows, and
-executes every proposed action on the live authenticated Vultr sandbox. It
-then downloads the signed GRPO summary, writes the overall and per-fault
-absolute deltas, and uploads both the baseline and comparison as immutable
-signed stages. No LLM judges either model.
-
 ### Original SFT and schema-v1 workflow
 
 The supported workflow has one CPU data phase followed by two fresh Kaggle GPU
@@ -180,13 +161,13 @@ sessions:
    and automatically uploads the four JSONL files, manifest, and dataset
    `_SUCCESS.json` to the private `devaanshpa/CrashDiag` bucket. Save the
    printed `RUN_ID` and `SOURCE_COMMIT`.
-2. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
+2. Open [`notebooks/qwen2.5_3b_instruct/sft.ipynb`](notebooks/qwen2.5_3b_instruct/sft.ipynb) in a fresh Kaggle session,
    paste those two values, enable Internet and a GPU, and attach only the
    `HF_TOKEN` Kaggle Secret. The notebook checks out the exact source revision,
    downloads and hash-verifies the completed dataset stage, trains SFT
    exclusively from those downloaded files, and displays the generated loss,
    learning-rate, and gradient charts after their signed bucket upload.
-3. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
+3. Open [`notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb`](notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb) in another fresh Kaggle
    session, enable Internet and a GPU, and attach `HF_TOKEN` plus
    `CRASHDIAG_SANDBOX_TOKEN`. Paste the same `RUN_ID` and `SOURCE_COMMIT`, start
    in smoke mode, and proceed to the full run only after checking the displayed
@@ -619,17 +600,11 @@ prevents an LLM hallucination from selecting an arbitrary package version.
 
 ## Repository layout
 
-- `notebooks/sft.ipynb`: primary independent Kaggle dataset-download and LoRA
-  SFT workflow; requires only the `HF_TOKEN` Kaggle Secret.
-- `notebooks/grpo.ipynb`: primary independent Kaggle GRPO and mechanical
-  evaluation workflow; restores the exact SFT run and uses the authenticated
-  Vultr sandbox.
-- `notebooks/grpo_hard.ipynb`: hard-only Kaggle pipeline with automatic
-  calibration, smoke/full training, two exact evaluations, graphs, private
-  uploads, and fail-closed promotion.
-- `notebooks/eval_parent_sft_hard.ipynb`: independent exact 192-row hard
-  evaluation of the signed parent SFT adapter plus a signed SFT-versus-GRPO-v1
-  comparison.
+- `notebooks/qwen2.5_3b_instruct/`: the complete Qwen base-evaluation, SFT,
+  post-SFT evaluation, and hard-GRPO workflow.
+- `notebooks/gemma3_1b_it/`, `notebooks/deepseek_r1_distill_qwen_1.5b/`, and
+  `notebooks/ministral3_3b_instruct_2512/`: comparable base-evaluation
+  notebooks for the other three models.
 - `crashdiag/`: core environment, agents, verifier, and sandbox backends.
 - `training/generate_dataset.py`: deterministic dataset construction plus
   automatic private-bucket upload and handoff identifiers.
