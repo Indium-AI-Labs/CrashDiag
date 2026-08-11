@@ -80,7 +80,7 @@ def evaluate_rows(
             prompts=[prompt],
             scenario_schema_version=[row.get("scenario_schema_version", 1)],
             scenario_profile=[row.get("scenario_profile")]
-            if row.get("scenario_schema_version", 1) == 2
+            if int(row.get("scenario_schema_version", 1)) >= 2
             else None,
             log_extra=log_extra,
         )
@@ -111,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-new-tokens", type=int, default=96)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--load-in-4bit", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--sandbox-url", default=os.environ.get("CRASHDIAG_SANDBOX_URL", ""))
     parser.add_argument(
         "--sandbox-token",
@@ -149,6 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.model,
             precision=args.precision,
             trust_remote_code=args.trust_remote_code,
+            load_in_4bit=args.load_in_4bit,
         )
 
         def generate_one(messages: Sequence[Mapping[str, str]]) -> str:

@@ -14,13 +14,14 @@ def load_local_policy(
     *,
     precision: str = "auto",
     trust_remote_code: bool = False,
+    load_in_4bit: bool = False,
 ) -> tuple[Any, Any]:
     """Load a base model or PEFT adapter without import-time ML dependencies."""
 
     try:
         import torch
         from peft import AutoPeftModelForCausalLM, PeftConfig
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     except ImportError as exc:
         raise RuntimeError("install CrashDiag training dependencies before inference") from exc
 
@@ -28,6 +29,18 @@ def load_local_policy(
     adapter = Path(model_path).is_dir() and (Path(model_path) / "adapter_config.json").is_file()
     bf16, fp16 = resolve_precision(torch, precision)
     dtype = torch.bfloat16 if bf16 else torch.float16 if fp16 else torch.float32
+    quantization = (
+        BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        if load_in_4bit
+        else None
+    )
+    if load_in_4bit and not torch.cuda.is_available():
+        raise RuntimeError("--load-in-4bit requires a CUDA GPU")
     tokenizer_source = source
     if adapter:
         config = PeftConfig.from_pretrained(source)
@@ -36,6 +49,7 @@ def load_local_policy(
             source,
             dtype=dtype,
             device_map="auto",
+            quantization_config=quantization,
             trust_remote_code=trust_remote_code,
         )
     else:
@@ -43,6 +57,7 @@ def load_local_policy(
             source,
             dtype=dtype,
             device_map="auto",
+            quantization_config=quantization,
             trust_remote_code=trust_remote_code,
         )
     tokenizer = AutoTokenizer.from_pretrained(

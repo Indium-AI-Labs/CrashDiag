@@ -244,6 +244,7 @@ _MUTATIONS = frozenset(
         "set_dependency_version",
         "set_disk_usage",
         "set_proxy_target_port",
+        "set_service_state",
         "set_expected_env_var",
         "set_required_dependency_version",
         "set_app_port",
@@ -297,7 +298,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                     {
                         "status": "ok",
                         "service": "crashdiag-sandbox",
-                        "scenario_schema_versions": [1, 2],
+                        "scenario_schema_versions": [1, 3],
                         "hard_scenario_batch": True,
                         "sessions": self.sandbox_server.sessions.stats(),
                     },

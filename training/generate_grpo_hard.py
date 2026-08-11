@@ -1,4 +1,4 @@
-"""Generate the schema-v2, GRPO-only CrashDiag curriculum.
+"""Generate the schema-v3, GRPO-only CrashDiag curriculum.
 
 The output contains no SFT completions or hidden expert labels.  Every row is
 mechanically proven solvable against ``MockSandbox`` before it is written.  A
@@ -39,7 +39,6 @@ from .hard_scenarios import (
 )
 
 
-DEFAULT_PARENT_SFT_RUN_ID = "20260719T113724Z-dataset-b26381b116bc"
 DEFAULT_TRAIN_OUTPUT = Path("data/grpo_hard_train.jsonl")
 DEFAULT_EVAL_OUTPUT = Path("data/grpo_hard_eval.jsonl")
 DEFAULT_SUMMARY_OUTPUT = Path("data/grpo_hard_summary.json")
@@ -180,8 +179,8 @@ def generate_hard_datasets(
     eval_output: str | Path = DEFAULT_EVAL_OUTPUT,
     summary_output: str | Path = DEFAULT_SUMMARY_OUTPUT,
     *,
-    train_samples_per_fault: int = 128,
-    eval_samples_per_fault: int = 32,
+    train_samples_per_fault: int = 24,
+    eval_samples_per_fault: int = 8,
     seed: int = 42,
 ) -> dict[str, Any]:
     """Write disjoint, balanced hard train/eval rows and their summary."""
@@ -246,13 +245,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-output", type=Path, default=DEFAULT_EVAL_OUTPUT)
     parser.add_argument("--summary-output", type=Path, default=DEFAULT_SUMMARY_OUTPUT)
     parser.add_argument("--parent-output", type=Path, default=DEFAULT_PARENT_OUTPUT)
-    parser.add_argument("--train-samples-per-fault", type=int, default=128)
-    parser.add_argument("--eval-samples-per-fault", type=int, default=32)
+    parser.add_argument("--train-samples-per-fault", type=int, default=24)
+    parser.add_argument("--eval-samples-per-fault", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--parent-sft-run-id",
-        default=os.environ.get("CRASHDIAG_PARENT_SFT_RUN_ID", "").strip()
-        or DEFAULT_PARENT_SFT_RUN_ID,
+        default=os.environ.get("CRASHDIAG_PARENT_SFT_RUN_ID", "").strip(),
     )
     parser.add_argument(
         "--parent-sft-stage-dir",

@@ -191,6 +191,109 @@ class PortProxyMisconfig(FaultModule):
         )
 
 
+class EnvironmentRollbackFault(FaultModule):
+    """A deployment setting whose last known-good value must be restored."""
+
+    name = "environment_rollback"
+    difficulty = "medium"
+    variable_name = ""
+    bad_value = "invalid"
+
+    def inject(self, instance: Any) -> None:
+        instance.set_env_var(self.variable_name, self.bad_value)
+
+    def is_resolved(self, instance: Any) -> bool:
+        variables, expected = _environment(_observe(instance))
+        return variables.get(self.variable_name) == expected.get(self.variable_name) and _mechanically_healthy(instance)
+
+
+class MissingSecret(EnvironmentRollbackFault):
+    name = "missing_secret"
+    variable_name = "API_SIGNING_SECRET"
+    bad_value = ""
+
+
+class FeatureFlagMisconfiguration(EnvironmentRollbackFault):
+    name = "feature_flag_misconfiguration"
+    variable_name = "FEATURE_ASYNC_JOBS"
+    bad_value = "enabled-without-worker"
+
+
+class RedisConnectionFailure(EnvironmentRollbackFault):
+    name = "redis_connection_failure"
+    variable_name = "REDIS_URL"
+    bad_value = "redis://missing-cache:6379/0"
+
+
+class MessageQueueConnectionFailure(EnvironmentRollbackFault):
+    name = "message_queue_connection_failure"
+    variable_name = "QUEUE_URL"
+    bad_value = "amqp://missing-broker:5672/tasks"
+
+
+class ObjectStorageCredentialsFailure(EnvironmentRollbackFault):
+    name = "object_storage_credentials_failure"
+    variable_name = "OBJECT_STORAGE_TOKEN"
+    bad_value = "revoked-token"
+
+
+class ServiceStateFault(FaultModule):
+    """A bounded service state restored by one allowlisted remediation action."""
+
+    name = "service_state"
+    difficulty = "hard"
+    service_name = ""
+
+    def inject(self, instance: Any) -> None:
+        instance.set_service_state(self.service_name, False)
+
+    def is_resolved(self, instance: Any) -> bool:
+        services = _observe(instance).get("services", {})
+        return bool(isinstance(services, Mapping) and services.get(self.service_name) is True and _mechanically_healthy(instance))
+
+
+class CacheCorruption(ServiceStateFault):
+    name = "cache_corruption"
+    difficulty = "medium"
+    service_name = "cache"
+
+
+class TLSCertificateFailure(ServiceStateFault):
+    name = "tls_certificate_failure"
+    difficulty = "hard"
+    service_name = "tls"
+
+
+class FilePermissionFailure(ServiceStateFault):
+    name = "file_permission_failure"
+    difficulty = "medium"
+    service_name = "permissions"
+
+
+class SchemaMigrationPending(ServiceStateFault):
+    name = "schema_migration_pending"
+    difficulty = "hard"
+    service_name = "migration"
+
+
+class DatabasePoolExhaustion(ServiceStateFault):
+    name = "database_pool_exhaustion"
+    difficulty = "hard"
+    service_name = "db_pool"
+
+
+class DNSResolutionFailure(ServiceStateFault):
+    name = "dns_resolution_failure"
+    difficulty = "hard"
+    service_name = "dns"
+
+
+class RateLimitMisconfiguration(ServiceStateFault):
+    name = "rate_limit_misconfiguration"
+    difficulty = "medium"
+    service_name = "rate_limit"
+
+
 ALL_FAULTS = (
     OOMKill(),
     BadEnvVar(),
@@ -198,6 +301,18 @@ ALL_FAULTS = (
     DependencyMismatch(),
     DiskFull(),
     PortProxyMisconfig(),
+    MissingSecret(),
+    FeatureFlagMisconfiguration(),
+    RedisConnectionFailure(),
+    MessageQueueConnectionFailure(),
+    ObjectStorageCredentialsFailure(),
+    CacheCorruption(),
+    TLSCertificateFailure(),
+    FilePermissionFailure(),
+    SchemaMigrationPending(),
+    DatabasePoolExhaustion(),
+    DNSResolutionFailure(),
+    RateLimitMisconfiguration(),
 )
 """Stateless fault instances ready for :meth:`Orchestrator.run_batch`."""
 
@@ -208,6 +323,18 @@ FAULT_TYPES = (
     DependencyMismatch,
     DiskFull,
     PortProxyMisconfig,
+    MissingSecret,
+    FeatureFlagMisconfiguration,
+    RedisConnectionFailure,
+    MessageQueueConnectionFailure,
+    ObjectStorageCredentialsFailure,
+    CacheCorruption,
+    TLSCertificateFailure,
+    FilePermissionFailure,
+    SchemaMigrationPending,
+    DatabasePoolExhaustion,
+    DNSResolutionFailure,
+    RateLimitMisconfiguration,
 )
 
 __all__ = [

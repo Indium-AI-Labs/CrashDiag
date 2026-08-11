@@ -106,6 +106,27 @@ class CoolifySandbox(SandboxBackend):
 
         self._unimplemented("fix_port_config")
 
+    def clear_cache(self) -> dict[str, Any]:
+        self._unimplemented("clear_cache")
+
+    def renew_tls_certificate(self) -> dict[str, Any]:
+        self._unimplemented("renew_tls_certificate")
+
+    def restore_file_permissions(self) -> dict[str, Any]:
+        self._unimplemented("restore_file_permissions")
+
+    def apply_database_migration(self) -> dict[str, Any]:
+        self._unimplemented("apply_database_migration")
+
+    def reset_database_pool(self) -> dict[str, Any]:
+        self._unimplemented("reset_database_pool")
+
+    def restore_dns_configuration(self) -> dict[str, Any]:
+        self._unimplemented("restore_dns_configuration")
+
+    def restore_rate_limit_configuration(self) -> dict[str, Any]:
+        self._unimplemented("restore_rate_limit_configuration")
+
     def wait_and_observe(self) -> dict[str, Any]:
         """Take no corrective action, then return a fresh observation."""
 
@@ -155,6 +176,11 @@ class CoolifySandbox(SandboxBackend):
         """Configure the disk-health boundary."""
 
         self._unimplemented("set_disk_health_threshold")
+
+    def set_service_state(self, name: str, healthy: bool) -> None:
+        """Set a disposable service-health state for fault injection."""
+
+        self._unimplemented("set_service_state")
 
 
 __all__ = ["CoolifySandbox"]

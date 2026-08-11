@@ -195,6 +195,27 @@ class HttpSandbox(SandboxBackend):
         )
         return self._action("fix_port_config", parameters)
 
+    def clear_cache(self) -> dict[str, Any]:
+        return self._action("clear_cache")
+
+    def renew_tls_certificate(self) -> dict[str, Any]:
+        return self._action("renew_tls_certificate")
+
+    def restore_file_permissions(self) -> dict[str, Any]:
+        return self._action("restore_file_permissions")
+
+    def apply_database_migration(self) -> dict[str, Any]:
+        return self._action("apply_database_migration")
+
+    def reset_database_pool(self) -> dict[str, Any]:
+        return self._action("reset_database_pool")
+
+    def restore_dns_configuration(self) -> dict[str, Any]:
+        return self._action("restore_dns_configuration")
+
+    def restore_rate_limit_configuration(self) -> dict[str, Any]:
+        return self._action("restore_rate_limit_configuration")
+
     def wait_and_observe(self) -> dict[str, Any]:
         return self._action("wait_and_observe")
 
@@ -212,6 +233,9 @@ class HttpSandbox(SandboxBackend):
 
     def set_proxy_target_port(self, port: int) -> None:
         self._mutation("set_proxy_target_port", {"port": port})
+
+    def set_service_state(self, name: str, healthy: bool) -> None:
+        self._mutation("set_service_state", {"name": name, "healthy": healthy})
 
     def set_expected_env_var(self, name: str, value: str) -> None:
         self._mutation("set_expected_env_var", {"name": name, "value": value})

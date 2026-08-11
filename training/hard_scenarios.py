@@ -25,8 +25,8 @@ from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 from .common import FAULT_NAMES, fault_for_name
 
 
-HARD_SCENARIO_SCHEMA_VERSION = 2
-HARD_CURRICULUM_VERSION = 2
+HARD_SCENARIO_SCHEMA_VERSION = 3
+HARD_CURRICULUM_VERSION = 3
 HARD_SCENARIO_PROFILES = ("redacted", "noisy", "shifted_noisy")
 HARD_SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
 Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
@@ -36,6 +36,13 @@ Choose exactly one action from this list:
 - fix_dependency
 - clear_disk
 - fix_port_config
+- clear_cache
+- renew_tls_certificate
+- restore_file_permissions
+- apply_database_migration
+- reset_database_pool
+- restore_dns_configuration
+- restore_rate_limit_configuration
 - wait_and_observe
 
 Reply with one JSON object only, using this schema:
@@ -182,6 +189,18 @@ def hard_expert_action(fault_name: str) -> dict[str, Any]:
         "dependency_mismatch": "fix_dependency",
         "disk_full": "clear_disk",
         "port_proxy_misconfig": "fix_port_config",
+        "missing_secret": "rollback_env_var",
+        "feature_flag_misconfiguration": "rollback_env_var",
+        "redis_connection_failure": "rollback_env_var",
+        "message_queue_connection_failure": "rollback_env_var",
+        "object_storage_credentials_failure": "rollback_env_var",
+        "cache_corruption": "clear_cache",
+        "tls_certificate_failure": "renew_tls_certificate",
+        "file_permission_failure": "restore_file_permissions",
+        "schema_migration_pending": "apply_database_migration",
+        "database_pool_exhaustion": "reset_database_pool",
+        "dns_resolution_failure": "restore_dns_configuration",
+        "rate_limit_misconfiguration": "restore_rate_limit_configuration",
     }
     try:
         action = actions[fault_name]
@@ -235,7 +254,7 @@ def prepare_hard_scenario(
     *,
     sandbox: SandboxBackend | None = None,
 ) -> tuple[Any, SandboxBackend, random.Random]:
-    """Reconstruct one schema-v2 scenario on a local or remote sandbox."""
+    """Reconstruct one schema-v3 scenario on a local or remote sandbox."""
 
     if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
         raise TypeError("scenario_seed must be an integer")
@@ -283,6 +302,7 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
     dependencies = observation.get("dependencies", {})
     disk = observation.get("disk", {})
     network = observation.get("network", {})
+    services = observation.get("services", {})
     recent_logs = (
         [str(item) for item in observation.get("recent_logs", [])]
         if isinstance(observation.get("recent_logs", []), list)
@@ -323,13 +343,14 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(network, Mapping)
             else None
         },
+        "services": dict(services) if isinstance(services, Mapping) else {},
         "clock_ticks": observation.get("clock_ticks"),
         "recent_logs": recent_logs,
     }
 
 
 def hard_observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Render the exact schema-v2 conversational prompt."""
+    """Render the exact schema-v3 conversational prompt."""
 
     content = json.dumps(
         {"observation": hard_observation(observation)},
@@ -394,7 +415,7 @@ def generate_hard_records(
     start_variation: int,
     split: str,
 ) -> list[dict[str, Any]]:
-    """Generate balanced schema-v2 records for all six existing faults."""
+    """Generate balanced schema-v3 records for every supported fault."""
 
     if (
         isinstance(samples_per_fault, bool)

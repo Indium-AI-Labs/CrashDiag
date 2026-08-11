@@ -23,6 +23,13 @@ class SandboxBackend(ABC):
             "fix_dependency",
             "clear_disk",
             "fix_port_config",
+            "clear_cache",
+            "renew_tls_certificate",
+            "restore_file_permissions",
+            "apply_database_migration",
+            "reset_database_pool",
+            "restore_dns_configuration",
+            "restore_rate_limit_configuration",
             "wait_and_observe",
         }
     )
@@ -60,6 +67,34 @@ class SandboxBackend(ABC):
         """Point the proxy at the intended application port."""
 
     @abstractmethod
+    def clear_cache(self) -> dict[str, Any]:
+        """Restore the deployment cache to a healthy state."""
+
+    @abstractmethod
+    def renew_tls_certificate(self) -> dict[str, Any]:
+        """Restore the deployment TLS certificate."""
+
+    @abstractmethod
+    def restore_file_permissions(self) -> dict[str, Any]:
+        """Restore the service account's required file permissions."""
+
+    @abstractmethod
+    def apply_database_migration(self) -> dict[str, Any]:
+        """Apply the pending declared database migration."""
+
+    @abstractmethod
+    def reset_database_pool(self) -> dict[str, Any]:
+        """Reset the exhausted database connection pool."""
+
+    @abstractmethod
+    def restore_dns_configuration(self) -> dict[str, Any]:
+        """Restore the deployment DNS resolver configuration."""
+
+    @abstractmethod
+    def restore_rate_limit_configuration(self) -> dict[str, Any]:
+        """Restore the declared request-rate configuration."""
+
+    @abstractmethod
     def wait_and_observe(self) -> dict[str, Any]:
         """Take no corrective action and return a fresh observation."""
 
@@ -82,6 +117,10 @@ class SandboxBackend(ABC):
     @abstractmethod
     def set_proxy_target_port(self, port: int) -> None:
         """Set the reverse proxy's upstream port for fault injection."""
+
+    @abstractmethod
+    def set_service_state(self, name: str, healthy: bool) -> None:
+        """Set a named mechanical service check for fault injection."""
 
     @abstractmethod
     def set_expected_env_var(self, name: str, value: str) -> None:
@@ -133,6 +172,11 @@ class MockSandbox(SandboxBackend):
     DEFAULT_ENV: ClassVar[dict[str, str]] = {
         "APP_ENV": "production",
         "DATABASE_URL": "postgresql://app:secret@database:5432/app",
+        "API_SIGNING_SECRET": "known-good-secret",
+        "FEATURE_ASYNC_JOBS": "enabled",
+        "REDIS_URL": "redis://cache:6379/0",
+        "QUEUE_URL": "amqp://broker:5672/tasks",
+        "OBJECT_STORAGE_TOKEN": "known-good-storage-token",
     }
     DEFAULT_DEPENDENCIES: ClassVar[dict[str, str]] = {
         "psycopg": "3.1.18",
@@ -141,6 +185,15 @@ class MockSandbox(SandboxBackend):
     DEFAULT_DISK_PERCENT: ClassVar[float] = 35.0
     DISK_HEALTH_THRESHOLD: ClassVar[float] = 90.0
     DEFAULT_APP_PORT: ClassVar[int] = 8080
+    DEFAULT_SERVICES: ClassVar[dict[str, bool]] = {
+        "cache": True,
+        "tls": True,
+        "permissions": True,
+        "migration": True,
+        "db_pool": True,
+        "dns": True,
+        "rate_limit": True,
+    }
 
     def __init__(self) -> None:
         self.expected_env: dict[str, str] = dict(self.DEFAULT_ENV)
@@ -151,6 +204,7 @@ class MockSandbox(SandboxBackend):
         self.disk_health_threshold = self.DISK_HEALTH_THRESHOLD
         self.app_port = self.DEFAULT_APP_PORT
         self.proxy_target_port = self.DEFAULT_APP_PORT
+        self.services: dict[str, bool] = dict(self.DEFAULT_SERVICES)
         self.process_running = True
         self.last_exit_reason: str | None = None
         self.restart_count = 0
@@ -174,9 +228,9 @@ class MockSandbox(SandboxBackend):
         return str(self.health_check()["status"])
 
     def _checks(self) -> dict[str, bool]:
-        environment_ok = self.env_vars.get("APP_ENV") == self.expected_env["APP_ENV"]
-        database_ok = (
-            self.env_vars.get("DATABASE_URL") == self.expected_env["DATABASE_URL"]
+        environment_ok = all(
+            self.env_vars.get(name) == expected
+            for name, expected in self.expected_env.items()
         )
         dependencies_ok = all(
             self.dependencies.get(name) == required
@@ -187,10 +241,10 @@ class MockSandbox(SandboxBackend):
         return {
             "process": self.process_running,
             "environment": environment_ok,
-            "database": database_ok,
             "dependencies": dependencies_ok,
             "disk": disk_ok,
             "port_proxy": port_ok,
+            **self.services,
         }
 
     def health_check(self) -> dict[str, Any]:
@@ -239,6 +293,7 @@ class MockSandbox(SandboxBackend):
                 "app_port": self.app_port,
                 "proxy_target_port": self.proxy_target_port,
             },
+            "services": dict(self.services),
             "clock_ticks": self.clock_ticks,
             "recent_logs": list(self.logs[-10:]),
         }
@@ -354,6 +409,34 @@ class MockSandbox(SandboxBackend):
         self.logs.append(f"proxy upstream changed to port {target_port}")
         return self._record_action("fix_port_config", previous != target_port)
 
+    def _restore_service(self, service: str, action: str) -> dict[str, Any]:
+        previous = self.services[service]
+        self.services[service] = True
+        self.clock_ticks += 1
+        self.logs.append(f"{service} service restored")
+        return self._record_action(action, previous is not True)
+
+    def clear_cache(self) -> dict[str, Any]:
+        return self._restore_service("cache", "clear_cache")
+
+    def renew_tls_certificate(self) -> dict[str, Any]:
+        return self._restore_service("tls", "renew_tls_certificate")
+
+    def restore_file_permissions(self) -> dict[str, Any]:
+        return self._restore_service("permissions", "restore_file_permissions")
+
+    def apply_database_migration(self) -> dict[str, Any]:
+        return self._restore_service("migration", "apply_database_migration")
+
+    def reset_database_pool(self) -> dict[str, Any]:
+        return self._restore_service("db_pool", "reset_database_pool")
+
+    def restore_dns_configuration(self) -> dict[str, Any]:
+        return self._restore_service("dns", "restore_dns_configuration")
+
+    def restore_rate_limit_configuration(self) -> dict[str, Any]:
+        return self._restore_service("rate_limit", "restore_rate_limit_configuration")
+
     def wait_and_observe(self) -> dict[str, Any]:
         self.clock_ticks += 1
         return self._record_action("wait_and_observe", False)
@@ -395,6 +478,14 @@ class MockSandbox(SandboxBackend):
         self._validate_port(port)
         self.proxy_target_port = port
         self.logs.append(f"proxy upstream changed to port {port}")
+
+    def set_service_state(self, name: str, healthy: bool) -> None:
+        if name not in self.services:
+            raise ValueError(f"unknown service state {name!r}")
+        if not isinstance(healthy, bool):
+            raise TypeError("service health must be boolean")
+        self.services[name] = healthy
+        self.logs.append(f"{name} service marked {'healthy' if healthy else 'unhealthy'}")
 
     def set_expected_env_var(self, name: str, value: str) -> None:
         """Set a clean environment baseline without adding diagnostic history."""

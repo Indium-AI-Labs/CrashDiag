@@ -48,7 +48,7 @@ class MechanicalRewardTests(unittest.TestCase):
 
         self.assertEqual(rewards, [1.0, 1.0])
 
-    def test_generated_expert_actions_reward_all_six_faults(self) -> None:
+    def test_generated_expert_actions_reward_all_faults(self) -> None:
         sft_rows, grpo_rows = generate_records(samples_per_fault=1, seed=91)
         rewards = mechanical_reward(
             [row["completion"] for row in sft_rows],
@@ -57,7 +57,7 @@ class MechanicalRewardTests(unittest.TestCase):
             prompts=[row["prompt"] for row in grpo_rows],
         )
 
-        self.assertEqual(rewards, [1.0] * 6)
+        self.assertEqual(rewards, [1.0] * len(FAULT_NAMES))
 
     def test_schema_v2_replays_every_fault_and_profile(self) -> None:
         rows = []

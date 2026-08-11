@@ -135,11 +135,11 @@ def promotion_gate(
         if isinstance(value, Mapping)
     ]
     gates = {
-        "hard_complete": int(hard_summary.get("total_episodes", 0)) == 192,
+        "hard_complete": int(hard_summary.get("total_episodes", 0)) == 144,
         "hard_success": hard_rate >= minimum_hard_success,
-        "hard_per_fault": len(per_fault_rates) == 6
+        "hard_per_fault": len(per_fault_rates) == 18
         and min(per_fault_rates, default=0.0) >= minimum_hard_fault_success,
-        "regression_complete": int(regression_summary.get("total_episodes", 0)) >= 96,
+        "regression_complete": int(regression_summary.get("total_episodes", 0)) >= 144,
         "regression_success": regression_rate >= minimum_regression_success,
         "backend_error_rate_zero": hard_backend == 0.0 and regression_backend == 0.0,
     }

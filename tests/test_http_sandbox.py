@@ -204,7 +204,7 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
-            self.assertIn(2, payload["scenario_schema_versions"])
+            self.assertIn(3, payload["scenario_schema_versions"])
             self.assertTrue(payload["hard_scenario_batch"])
 
             with self.assertRaises(SandboxHTTPError) as missing:

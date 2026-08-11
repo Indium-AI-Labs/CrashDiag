@@ -388,6 +388,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.3)
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument(
+        "--load-in-4bit",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Load the base policy with NF4 QLoRA (for example Qwen3-14B on T4 GPUs).",
+    )
+    parser.add_argument(
         "--artifact-stage",
         default="grpo",
         help="bucket stage name; use grpo-smoke for a preliminary job",
@@ -551,8 +557,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         import torch
         from datasets import load_dataset
-        from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig
-        from transformers import AutoTokenizer
+        from peft import (
+            AutoPeftModelForCausalLM,
+            LoraConfig,
+            PeftConfig,
+            PeftModel,
+            prepare_model_for_kbit_training,
+        )
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from trl import GRPOConfig, GRPOTrainer
     except ImportError as exc:
         raise SystemExit(
@@ -593,12 +605,35 @@ def main(argv: list[str] | None = None) -> int:
     tokenizer.padding_side = "left"
 
     if adapter_checkpoint:
-        model: Any = AutoPeftModelForCausalLM.from_pretrained(
-            args.model,
-            is_trainable=True,
-            dtype=dtype,
-            trust_remote_code=args.trust_remote_code,
-        )
+        if args.load_in_4bit:
+            if not torch.cuda.is_available():
+                raise SystemExit("--load-in-4bit requires a CUDA GPU")
+            adapter_config = PeftConfig.from_pretrained(args.model)
+            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+            base_model = AutoModelForCausalLM.from_pretrained(
+                adapter_config.base_model_name_or_path,
+                quantization_config=BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                ),
+                device_map={"": local_rank},
+                trust_remote_code=args.trust_remote_code,
+            )
+            base_model.config.use_cache = False
+            model = PeftModel.from_pretrained(
+                prepare_model_for_kbit_training(base_model),
+                args.model,
+                is_trainable=True,
+            )
+        else:
+            model = AutoPeftModelForCausalLM.from_pretrained(
+                args.model,
+                is_trainable=True,
+                dtype=dtype,
+                trust_remote_code=args.trust_remote_code,
+            )
         peft_config = None
         model_init_kwargs = None
     else:
@@ -616,6 +651,8 @@ def main(argv: list[str] | None = None) -> int:
             else None
         )
         model_init_kwargs = {"dtype": dtype}
+        if args.load_in_4bit:
+            raise SystemExit("--load-in-4bit requires an SFT adapter passed through --model")
 
     eval_enabled = eval_dataset is not None
     config = GRPOConfig(

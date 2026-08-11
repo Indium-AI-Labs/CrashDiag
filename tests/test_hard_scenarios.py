@@ -1,4 +1,4 @@
-"""Schema-v2 hard-scenario determinism and mechanical-solvability tests."""
+"""Schema-v3 hard-scenario determinism and mechanical-solvability tests."""
 
 from __future__ import annotations
 
@@ -72,11 +72,11 @@ class HardScenarioTests(unittest.TestCase):
             split="eval",
         )
         self.assertEqual(first, second)
-        self.assertEqual(len(first), 36)
+        self.assertEqual(len(first), 108)
         self.assertEqual(Counter(row["fault_name"] for row in first), {name: 6 for name in FAULT_NAMES})
         self.assertEqual(
             Counter(row["scenario_profile"] for row in first),
-            {profile: 12 for profile in HARD_SCENARIO_PROFILES},
+            {profile: 36 for profile in HARD_SCENARIO_PROFILES},
         )
         train_seeds = {row["sample_seed"] for row in first}
         eval_seeds = {row["sample_seed"] for row in evaluation}
@@ -86,7 +86,7 @@ class HardScenarioTests(unittest.TestCase):
             self.assertNotIn('"completion"', serialized)
             self.assertNotIn('"answer"', serialized)
             self.assertNotIn('"target"', serialized)
-            self.assertEqual(row["scenario_schema_version"], 2)
+            self.assertEqual(row["scenario_schema_version"], 3)
             self.assertEqual(row["curriculum_version"], HARD_CURRICULUM_VERSION)
             self.assertEqual(
                 row["metadata"]["curriculum_version"],

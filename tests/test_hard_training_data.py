@@ -1,4 +1,4 @@
-"""Tests for the answer-free schema-v2 GRPO dataset handoff."""
+"""Tests for the answer-free schema-v3 GRPO dataset handoff."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _sha(path: Path) -> str:
 
 
 class HardDatasetTests(unittest.TestCase):
-    def test_default_shape_is_768_train_and_192_eval(self) -> None:
+    def test_default_shape_is_432_train_and_144_eval(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             train = root / "train.jsonl"
@@ -28,19 +28,19 @@ class HardDatasetTests(unittest.TestCase):
             summary_path = root / "summary.json"
             summary = generate_hard_datasets(train, evaluation, summary_path)
 
-            self.assertEqual(summary["train"]["rows"], 768)
-            self.assertEqual(summary["eval"]["rows"], 192)
-            self.assertEqual(summary["curriculum_version"], 2)
+            self.assertEqual(summary["train"]["rows"], 432)
+            self.assertEqual(summary["eval"]["rows"], 144)
+            self.assertEqual(summary["curriculum_version"], 3)
             self.assertEqual(summary["action_contract"], "parameter_free_repairs")
             train_rows = [json.loads(line) for line in train.read_text().splitlines()]
             eval_rows = [json.loads(line) for line in evaluation.read_text().splitlines()]
             self.assertEqual(
                 Counter(row["fault_name"] for row in train_rows),
-                Counter({name: 128 for name in FAULT_NAMES}),
+                Counter({name: 24 for name in FAULT_NAMES}),
             )
             self.assertEqual(
                 Counter(row["fault_name"] for row in eval_rows),
-                Counter({name: 32 for name in FAULT_NAMES}),
+                Counter({name: 8 for name in FAULT_NAMES}),
             )
             self.assertEqual(
                 {row["scenario_profile"] for row in train_rows},

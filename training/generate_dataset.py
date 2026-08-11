@@ -181,6 +181,25 @@ def expert_action(fault_name: str, sandbox: MockSandbox, rng: random.Random) -> 
             "action": "fix_port_config",
             "parameters": {"target_port": sandbox.app_port},
         }
+    if fault_name in {
+        "missing_secret",
+        "feature_flag_misconfiguration",
+        "redis_connection_failure",
+        "message_queue_connection_failure",
+        "object_storage_credentials_failure",
+    }:
+        return {"action": "rollback_env_var", "parameters": {}}
+    service_actions = {
+        "cache_corruption": "clear_cache",
+        "tls_certificate_failure": "renew_tls_certificate",
+        "file_permission_failure": "restore_file_permissions",
+        "schema_migration_pending": "apply_database_migration",
+        "database_pool_exhaustion": "reset_database_pool",
+        "dns_resolution_failure": "restore_dns_configuration",
+        "rate_limit_misconfiguration": "restore_rate_limit_configuration",
+    }
+    if fault_name in service_actions:
+        return {"action": service_actions[fault_name], "parameters": {}}
     raise ValueError(f"no expert action for fault {fault_name!r}")
 
 
@@ -311,8 +330,8 @@ def generate_datasets(
     grpo_train_output: str | Path = DEFAULT_GRPO_TRAIN_OUTPUT,
     grpo_eval_output: str | Path = DEFAULT_GRPO_EVAL_OUTPUT,
     *,
-    train_samples_per_fault: int = 128,
-    eval_samples_per_fault: int = 16,
+    train_samples_per_fault: int = 64,
+    eval_samples_per_fault: int = 8,
     seed: int = 42,
 ) -> dict[str, int]:
     """Validate and write four stratified datasets, returning split row counts."""
@@ -376,14 +395,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--train-samples-per-fault",
         type=int,
-        default=128,
-        help="training variations for each of the six faults (default: 128)",
+        default=64,
+        help="training variations for each fault (default: 64)",
     )
     parser.add_argument(
         "--eval-samples-per-fault",
         type=int,
-        default=16,
-        help="evaluation variations for each of the six faults (default: 16)",
+        default=8,
+        help="evaluation variations for each fault (default: 8)",
     )
     parser.add_argument("--seed", type=int, default=42)
     add_artifact_arguments(parser)

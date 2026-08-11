@@ -1,4 +1,4 @@
-"""Static safety checks for the four supported model notebook folders."""
+"""Static safety checks for the one-model Qwen3-14B notebook workflow."""
 
 from __future__ import annotations
 
@@ -11,74 +11,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_ROOT = ROOT / "notebooks"
-MODELS = {
-    "qwen2.5_3b_instruct": (
-        "Qwen/Qwen2.5-3B-Instruct",
-        {"eval_base.ipynb"},
-    ),
-    "gemma3_1b_it": ("google/gemma-3-1b-it", {"eval_base.ipynb"}),
-    "deepseek_r1_distill_qwen_1.5b": (
-        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-        {"eval_base.ipynb"},
-    ),
-    "ministral3_3b_instruct_2512": (
-        "mistralai/Ministral-3-3B-Instruct-2512",
-        {"eval_base.ipynb"},
-    ),
-}
+MODEL_DIR = NOTEBOOK_ROOT / "qwen3_14b"
+NOTEBOOKS = {"eval_base.ipynb", "sft.ipynb", "eval_sft.ipynb", "grpo.ipynb"}
 
 
-def _notebook_source(path: Path) -> str:
+def _source(path: Path) -> str:
     notebook = json.loads(path.read_text(encoding="utf-8"))
     return "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
 
 
 class ModelNotebookTests(unittest.TestCase):
-    def test_notebooks_directory_contains_exactly_four_model_folders(self) -> None:
-        folders = {path.name for path in NOTEBOOK_ROOT.iterdir() if path.is_dir()}
-        self.assertEqual(folders, set(MODELS))
-        root_files = {path.name for path in NOTEBOOK_ROOT.iterdir() if path.is_file()}
-        self.assertEqual(root_files, {"sft.ipynb", "eval_sft.ipynb", "grpo.ipynb"})
-        for slug, (_, expected_files) in MODELS.items():
-            with self.subTest(slug=slug):
-                actual_files = {path.name for path in (NOTEBOOK_ROOT / slug).iterdir() if path.is_file()}
-                self.assertEqual(actual_files, expected_files)
+    def test_only_the_qwen3_14b_workflow_is_present(self) -> None:
+        self.assertEqual({path.name for path in NOTEBOOK_ROOT.iterdir()}, {"qwen3_14b"})
+        self.assertEqual({path.name for path in MODEL_DIR.iterdir()}, NOTEBOOKS)
 
-    def test_all_notebooks_are_valid_python_and_do_not_embed_secrets(self) -> None:
-        for slug, (_, names) in MODELS.items():
-            for name in names:
-                path = NOTEBOOK_ROOT / slug / name
-                notebook = json.loads(path.read_text(encoding="utf-8"))
-                for index, cell in enumerate(notebook["cells"]):
-                    source = "".join(cell.get("source", []))
-                    self.assertIsNone(re.search(r"hf_[A-Za-z0-9]{12,}", source))
-                    self.assertNotIn("--hf-token", source.lower())
-                    self.assertNotIn("--sandbox-token", source.lower())
-                    if cell.get("cell_type") == "code":
-                        ast.parse(source, f"{path}:cell-{index}", "exec")
+    def test_notebooks_are_safe_valid_python(self) -> None:
+        for name in NOTEBOOKS:
+            notebook = json.loads((MODEL_DIR / name).read_text(encoding="utf-8"))
+            for index, cell in enumerate(notebook["cells"]):
+                source = "".join(cell.get("source", []))
+                self.assertIsNone(re.search(r"hf_[A-Za-z0-9]{12,}", source))
+                if cell.get("cell_type") == "code":
+                    ast.parse(source, f"{name}:cell-{index}", "exec")
 
-    def test_model_ids_and_scoped_run_ids_are_explicit(self) -> None:
-        for slug, (model_id, names) in MODELS.items():
-            for name in names:
-                source = _notebook_source(NOTEBOOK_ROOT / slug / name)
-                with self.subTest(slug=slug, notebook=name):
-                    self.assertIn(f'BASE_MODEL = "{model_id}"', source)
-                    self.assertIn(f'MODEL_SLUG = "{slug}"', source)
-                    self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
-        for name in ("sft.ipynb", "eval_sft.ipynb"):
-            source = _notebook_source(NOTEBOOK_ROOT / name)
-            self.assertIn('ZoneInfo("Asia/Kolkata")', source)
-
-    def test_qwen_workflow_retains_signed_sft_and_hard_grpo_guards(self) -> None:
-        sft = _notebook_source(NOTEBOOK_ROOT / "sft.ipynb")
-        grpo = _notebook_source(NOTEBOOK_ROOT / "grpo.ipynb")
-        sft_eval = _notebook_source(NOTEBOOK_ROOT / "eval_sft.ipynb")
-        for marker in ('dataset_client.download_stage("datasets", DATASET_DIR)', "sft_main([", '"--model", BASE_MODEL'):
-            self.assertIn(marker, sft)
-        self.assertIn("TRAINER_COMMIT", sft)
-        self.assertIn("artifact_commit != SOURCE_COMMIT", sft)
-        for marker in ("calibrate_main", "SMOKE_GATE_VERIFIED=true", "promotion_gate(", "uploader.complete_run"):
-            self.assertIn(marker, grpo)
-        for marker in ("SFT_RUN_ID", "SFT adapter/base-model mismatch", '"--model", str(SFT_DIR)'):
-            self.assertIn(marker, sft_eval)
-        self.assertIn("EXPECTED_BASE_MODEL", grpo)
+    def test_notebooks_use_qwen3_14b_qlora_and_bucket_artifacts(self) -> None:
+        for name in NOTEBOOKS:
+            source = _source(MODEL_DIR / name)
+            self.assertIn('BASE_MODEL = "Qwen/Qwen3-14B"', source)
+            self.assertIn('MODEL_SLUG = "qwen3_14b"', source)
+            self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
+        self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
+        self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
+        grpo = _source(MODEL_DIR / "grpo.ipynb")
+        self.assertIn('"--num_processes", "2"', grpo)
+        self.assertIn('"--max-steps", "24"', grpo)
+        self.assertIn('"96"', grpo)

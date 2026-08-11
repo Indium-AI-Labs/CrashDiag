@@ -1,73 +1,76 @@
-# CrashDiag 3B clean-start runbook
+# Fresh Qwen3-14B workflow
 
-Use `Qwen/Qwen2.5-3B-Instruct` for base, SFT, and GRPO. Evaluation is fixed-policy inference with mechanical sandbox execution; no planner, tool agent, or LLM judge is used.
+This repository now starts from an empty private artifact bucket and trains one
+model only: `Qwen/Qwen3-14B`. Use two Kaggle T4 GPUs with NF4 4-bit QLoRA.
+All run IDs are fresh; never reuse a completed run ID.
 
-## Model-scoped notebooks
+## 1. Deploy the disposable sandbox
 
-Each model folder contains only `eval_base.ipynb`, giving comparable baseline
-results. The root-level `notebooks/sft.ipynb`, `notebooks/eval_sft.ipynb`, and
-`notebooks/grpo.ipynb` are generic adapter workflows; select a base model with
-`CRASHDIAG_BASE_MODEL` and a slug with `CRASHDIAG_MODEL_SLUG`. Each evaluation
-notebook generates a distinct timestamped run ID by default.
+On the host that exposes the sandbox, update to this revision and deploy it:
 
-| Folder | Model | Lab |
-| --- | --- | --- |
-| `notebooks/qwen2.5_3b_instruct/` | `Qwen/Qwen2.5-3B-Instruct` | Alibaba Qwen |
-| `notebooks/gemma3_1b_it/` | `google/gemma-3-1b-it` | Google |
-| `notebooks/deepseek_r1_distill_qwen_1.5b/` | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | DeepSeek |
-| `notebooks/ministral3_3b_instruct_2512/` | `mistralai/Ministral-3-3B-Instruct-2512` | Mistral AI |
-
-Start with the four base evaluations, then use the Qwen folder for SFT, SFT
-evaluation, and GRPO. Gemma 3n is multimodal, so the latest compatible small
-text-only Gemma checkpoint is Gemma 3 1B Instruct. Before running it, accept
-Google's usage license on Hugging Face with the account behind `HF_TOKEN`.
-
-## 1. Deploy the public sandbox
-
-On the VPS, put `CRASHDIAG_SANDBOX_TOKEN` and `CRASHDIAG_SANDBOX_DOMAIN` in the protected `.env`, then run:
-
-```bash
-cd ~/CrashDiag
+```powershell
+git pull --ff-only origin main
 docker compose -f compose.yaml -f compose.public.yaml up --detach --build
-curl --fail https://sandbox.devaanshpathak.com/healthz
+curl.exe --fail https://sandbox.devaanshpathak.com/healthz
 ```
 
-Store that same sandbox token and a separate `HF_TOKEN` as Kaggle secrets.
+Keep these environment values only in the ignored `.env` or in Kaggle Secrets:
+`HF_TOKEN`, `CRASHDIAG_SANDBOX_URL`, and `CRASHDIAG_API_TOKEN`. The token is a
+long-lived secret for this disposable sandbox deployment; it is not committed
+or passed on a notebook command line.
 
-## 2. Generate the fresh standard dataset
+## 2. Generate the fresh standard data
 
-On a trusted machine with `HF_TOKEN` and bucket settings in `.env`:
+On a trusted machine with `.env` loaded, install just the artifact tools and
+generate the standard 18-fault dataset. This uploads one fresh `datasets`
+stage to the private `devaanshpa/CrashDiag` bucket.
 
 ```powershell
 python -m pip install -e ".[artifacts]"
-python -m training.generate_dataset `
-  --train-samples-per-fault 128 `
-  --eval-samples-per-fault 16 `
-  --seed 42
+python -m training.generate_dataset --train-samples-per-fault 64 --eval-samples-per-fault 8 --seed 42
 ```
 
-Copy the printed `RUN_ID` and `SOURCE_COMMIT`. The signed dataset stage contains 768 training and 96 evaluation rows.
+Record the printed `RUN_ID` as `CRASHDIAG_DATASET_RUN_ID`. It contains 1,152
+training rows and 144 held-out evaluation rows. The 18 tasks are the original
+six faults plus missing-secret, feature-flag, Redis, queue, object-storage,
+cache, TLS, permissions, migration, database-pool, DNS, and rate-limit faults.
 
-## 3. Evaluate base Qwen 3B
+## 3. Base-model evaluation
 
-Open `notebooks/qwen2.5_3b_instruct/eval_base.ipynb` in a fresh Kaggle GPU session. Set:
+In Kaggle, create a two-T4 notebook session with Internet enabled. Add
+`HF_TOKEN`, `CRASHDIAG_SANDBOX_URL`, and `CRASHDIAG_API_TOKEN` as Secrets and
+set `CRASHDIAG_DATASET_RUN_ID` to the recorded dataset run. Run
+`notebooks/qwen3_14b/eval_base.ipynb`.
 
-```text
-CRASHDIAG_DATASET_RUN_ID=<dataset RUN_ID>
-CRASHDIAG_DATASET_SOURCE_COMMIT=<dataset SOURCE_COMMIT>
-CRASHDIAG_BASE_EVAL_RUN_ID=<optional override; otherwise generated in IST>
+It creates an IST timestamped base-evaluation run ID unless
+`CRASHDIAG_BASE_QWEN3_14B_RUN_ID` is set, evaluates all 144 held-out rows with
+Qwen3 thinking disabled, and uploads its report to the bucket.
+
+## 4. QLoRA SFT and SFT evaluation
+
+Run `notebooks/qwen3_14b/sft.ipynb` in a fresh two-T4 Kaggle session with the
+same dataset run. It uses NF4 QLoRA, completion-only SFT loss, two epochs, and
+uploads an IST timestamped `sft` stage. Copy its printed `SFT_RUN_ID`.
+
+Set `CRASHDIAG_SFT_RUN_ID` to that ID and run
+`notebooks/qwen3_14b/eval_sft.ipynb`. The notebook downloads the signed SFT
+adapter, evaluates the same 144 rows, and uploads a separate `sft-eval` stage.
+
+## 5. GRPO and final evaluation
+
+With both `CRASHDIAG_DATASET_RUN_ID` and `CRASHDIAG_SFT_RUN_ID` set, run
+`notebooks/qwen3_14b/grpo.ipynb` in a fresh two-T4 session. It starts from the
+SFT adapter, uses two-process `accelerate` plus NF4 QLoRA, runs a 24-step smoke
+stage, then a separate 96-step GRPO stage using four generations.
+
+For the harder redacted/noisy curriculum, generate a new hard dataset after SFT
+has completed:
+
+```powershell
+python -m training.generate_grpo_hard --parent-sft-run-id <SFT_RUN_ID> --train-samples-per-fault 24 --eval-samples-per-fault 8 --seed 42
 ```
 
-Run all cells. It uploads a signed `base-qwen-evaluation` result for the exact 96 rows.
-
-## 4. Train and evaluate SFT
-
-Run `notebooks/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it defaults to Qwen 2.5 3B. Then run `notebooks/eval_sft.ipynb` against the same `grpo_eval.jsonl`.
-
-## 5. Train and evaluate GRPO
-
-Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/grpo.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
-
-## 6. Compare
-
-Publish one signed comparison artifact with raw per-row outcomes, overall/per-fault success, strict-JSON and backend-error rates, adapter SHA-256 values, evaluator commit, and data manifest SHA-256. Do not compare mismatched manifests, deployments, or settings.
+That run contains 432 hard training rows and 144 hard evaluation rows across
+the same 18 fault families. Evaluate the GRPO adapter with `evaluate_jsonl`
+using `--load-in-4bit` against both the normal and hard held-out datasets; each
+evaluation is uploaded under its own fresh run ID.

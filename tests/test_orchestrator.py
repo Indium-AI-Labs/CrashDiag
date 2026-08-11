@@ -18,6 +18,13 @@ class _FaultAwareScriptedAgent:
         "dependencies": "fix_dependency",
         "disk": "clear_disk",
         "port_proxy": "fix_port_config",
+        "cache": "clear_cache",
+        "tls": "renew_tls_certificate",
+        "permissions": "restore_file_permissions",
+        "migration": "apply_database_migration",
+        "db_pool": "reset_database_pool",
+        "dns": "restore_dns_configuration",
+        "rate_limit": "restore_rate_limit_configuration",
     }
 
     def choose_action(

@@ -51,7 +51,7 @@ class MockFaultTests(unittest.TestCase):
     )
 
     def test_all_faults_inject_and_resolve_mechanically(self) -> None:
-        self.assertEqual(len(ALL_FAULTS), 6)
+        self.assertEqual(len(ALL_FAULTS), 18)
 
         for fault_type, recovery_action in self.CASES:
             with self.subTest(fault=fault_type.__name__):

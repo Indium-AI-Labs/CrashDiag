@@ -21,6 +21,13 @@ ACTION_SPACE = (
     "fix_dependency",
     "clear_disk",
     "fix_port_config",
+    "clear_cache",
+    "renew_tls_certificate",
+    "restore_file_permissions",
+    "apply_database_migration",
+    "reset_database_pool",
+    "restore_dns_configuration",
+    "restore_rate_limit_configuration",
     "wait_and_observe",
 )
 """The complete set of actions a blue agent may emit."""
@@ -33,6 +40,13 @@ Choose exactly one action from this list:
 - fix_dependency
 - clear_disk
 - fix_port_config
+- clear_cache
+- renew_tls_certificate
+- restore_file_permissions
+- apply_database_migration
+- reset_database_pool
+- restore_dns_configuration
+- restore_rate_limit_configuration
 - wait_and_observe
 
 Reply with one JSON object only, using this schema:

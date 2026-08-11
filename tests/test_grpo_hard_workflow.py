@@ -155,7 +155,7 @@ class CalibrationTests(unittest.TestCase):
             samples_per_fault=9, seed=12, start_variation=0, split="train"
         )
         selected = select_calibration_rows(rows, prompts_per_fault_profile=2)
-        self.assertEqual(len(selected), 36)
+        self.assertEqual(len(selected), 108)
         cells = {(row["fault_name"], row["scenario_profile"]) for row in selected}
         self.assertEqual(len(cells), len(FAULT_NAMES) * len(HARD_SCENARIO_PROFILES))
 
@@ -165,8 +165,8 @@ class CalibrationTests(unittest.TestCase):
         for fault_index, fault in enumerate(FAULT_NAMES):
             for _ in range(2):
                 for generation in range(8):
-                    reward = 1.0 if fault_index < 4 and generation < 4 else 0.0
-                    if fault_index >= 4:
+                    reward = 1.0 if fault_index < 10 and generation < 4 else 0.0
+                    if fault_index >= 10:
                         reward = 1.0
                     rollouts.append(
                         {
@@ -180,7 +180,7 @@ class CalibrationTests(unittest.TestCase):
                 prompt_index += 1
         result = summarize_temperature(rollouts, expected_group_size=8)
         self.assertTrue(result["passed"])
-        self.assertEqual(len(result["mixed_fault_families"]), 4)
+        self.assertEqual(len(result["mixed_fault_families"]), 10)
         self.assertEqual(
             set(result["positive_reward_fault_families"]),
             set(FAULT_NAMES),
@@ -247,7 +247,7 @@ class CalibrationTests(unittest.TestCase):
             )
         self.assertTrue(report["passed"])
         self.assertEqual(maximum_active, 2)
-        self.assertTrue(any("18/18 prompt groups" in message for message in messages))
+        self.assertTrue(any("54/54 prompt groups" in message for message in messages))
 
 
 class EvaluationAndGateTests(unittest.TestCase):
@@ -312,10 +312,10 @@ class EvaluationAndGateTests(unittest.TestCase):
 
             hard = root / "hard.json"
             regression = root / "regression.json"
-            report(hard, 192, 0.8, 0.6)
-            report(regression, 96, 0.98, 0.98)
+            report(hard, 144, 0.8, 0.6)
+            report(regression, 144, 0.98, 0.98)
             self.assertTrue(promotion_gate(hard, regression)["passed"])
-            report(hard, 192, 0.8, 0.4)
+            report(hard, 144, 0.8, 0.4)
             self.assertFalse(promotion_gate(hard, regression)["passed"])
 
 

@@ -26,6 +26,13 @@ class _FaultAwareAgent:
         "dependencies": "fix_dependency",
         "disk": "clear_disk",
         "port_proxy": "fix_port_config",
+        "cache": "clear_cache",
+        "tls": "renew_tls_certificate",
+        "permissions": "restore_file_permissions",
+        "migration": "apply_database_migration",
+        "db_pool": "reset_database_pool",
+        "dns": "restore_dns_configuration",
+        "rate_limit": "restore_rate_limit_configuration",
     }
 
     def __init__(self) -> None:
@@ -96,7 +103,7 @@ class _FakeModel:
 
 
 class EvaluationTests(unittest.TestCase):
-    def test_all_six_faults_are_scored_mechanically_for_each_episode(self) -> None:
+    def test_all_faults_are_scored_mechanically_for_each_episode(self) -> None:
         agent = _FaultAwareAgent()
         _ClosableMockSandbox.closed_count = 0
 
@@ -106,12 +113,12 @@ class EvaluationTests(unittest.TestCase):
             make_sandbox=_ClosableMockSandbox,
         )
 
-        self.assertEqual(len(ALL_FAULTS), 6)
-        self.assertEqual(report["summary"]["total_episodes"], 12)
-        self.assertEqual(report["summary"]["resolved_episodes"], 12)
+        self.assertEqual(len(ALL_FAULTS), 18)
+        self.assertEqual(report["summary"]["total_episodes"], 36)
+        self.assertEqual(report["summary"]["resolved_episodes"], 36)
         self.assertEqual(report["summary"]["success_rate"], 1.0)
-        self.assertEqual(agent.calls, 12)
-        self.assertEqual(_ClosableMockSandbox.closed_count, 12)
+        self.assertEqual(agent.calls, 36)
+        self.assertEqual(_ClosableMockSandbox.closed_count, 36)
         self.assertEqual(set(report["per_fault"]), {fault.name for fault in ALL_FAULTS})
         for metrics in report["per_fault"].values():
             self.assertEqual(metrics["episodes"], 2)
@@ -132,7 +139,7 @@ class EvaluationTests(unittest.TestCase):
 
     def test_wait_policy_is_not_graded_as_success_and_report_round_trips(self) -> None:
         report = run_evaluation(_WaitAgent())
-        self.assertEqual(report["summary"]["total_episodes"], 6)
+        self.assertEqual(report["summary"]["total_episodes"], 18)
         self.assertEqual(report["summary"]["resolved_episodes"], 0)
         self.assertEqual(report["summary"]["success_rate"], 0.0)
         self.assertTrue(all(not item["resolved"] for item in report["trajectories"]))
@@ -141,7 +148,7 @@ class EvaluationTests(unittest.TestCase):
             output = save_report(report, Path(directory) / "nested" / "evaluation.json")
             loaded = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(loaded, report)
-        self.assertIn("overall: 0/6 (0.0%)", format_report(report))
+        self.assertIn("overall: 0/18 (0.0%)", format_report(report))
 
     def test_local_agent_generates_once_and_defensively_parses_json(self) -> None:
         tokenizer = _FakeTokenizer('{"action":"clear_disk","parameters":{}}')

@@ -18,6 +18,7 @@ artifacts = [
 ]
 train = [
   "accelerate>=1.10,<2",
+  "bitsandbytes>=0.46,<1",
   "datasets>=4,<5",
   "huggingface-hub>=1.5,<2",
   "peft>=0.18,<1",

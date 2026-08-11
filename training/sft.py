@@ -109,8 +109,8 @@ def train(args: argparse.Namespace) -> Any:
     try:
         import torch
         from datasets import load_dataset
-        from peft import LoraConfig, TaskType
-        from transformers import AutoTokenizer
+        from peft import LoraConfig, TaskType, prepare_model_for_kbit_training
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from trl import SFTConfig, SFTTrainer
     except ImportError as exc:
         raise SystemExit(
@@ -186,7 +186,8 @@ def train(args: argparse.Namespace) -> Any:
             "fp16": fp16,
             "report_to": args.report_to,
             "trust_remote_code": args.trust_remote_code,
-            "model_init_kwargs": {"dtype": model_dtype},
+            "model_init_kwargs": None if args.load_in_4bit else {"dtype": model_dtype},
+            "chat_template_kwargs": {"enable_thinking": False},
         },
     )
     config = SFTConfig(**config_kwargs)
@@ -199,8 +200,30 @@ def train(args: argparse.Namespace) -> Any:
         target_modules=args.lora_target_modules,
         bias="none",
     )
+    model: Any = args.model
+    if args.load_in_4bit:
+        if not torch.cuda.is_available():
+            raise SystemExit("--load-in-4bit requires a CUDA GPU")
+        local_rank = int(__import__("os").environ.get("LOCAL_RANK", "0"))
+        quantization = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            quantization_config=quantization,
+            device_map={"": local_rank},
+            trust_remote_code=args.trust_remote_code,
+        )
+        model.config.use_cache = False
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=args.gradient_checkpointing,
+        )
     trainer = SFTTrainer(
-        model=args.model,
+        model=model,
         args=config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if eval_enabled else None,
@@ -291,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--load-in-4bit",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Load the base model with NF4 QLoRA; required for Qwen3-14B on T4 GPUs.",
+    )
     parser.add_argument("--report-to", default="none")
     parser.add_argument("--resume-from-checkpoint", default=None)
     add_artifact_arguments(parser)
