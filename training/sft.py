@@ -11,6 +11,7 @@ and system instructions are context, never SFT labels.
 from __future__ import annotations
 
 import argparse
+import inspect
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -92,6 +93,16 @@ def _split_dataset(dataset: Any, eval_ratio: float, seed: int) -> tuple[Any, Any
     return dataset.select(train_indices), dataset.select(sorted(eval_indices))
 
 
+def _compatible_config_kwargs(factory: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop options unavailable in the installed TRL ``SFTConfig`` version."""
+
+    parameters = inspect.signature(factory).parameters.values()
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return kwargs
+    supported = {parameter.name for parameter in parameters}
+    return {name: value for name, value in kwargs.items() if name in supported}
+
+
 def train(args: argparse.Namespace) -> Any:
     """Run SFT and return TRL's training result."""
 
@@ -146,35 +157,39 @@ def train(args: argparse.Namespace) -> Any:
     eval_enabled = eval_dataset is not None and len(eval_dataset) > 0
     uploader = getattr(args, "artifact_uploader", None)
     callback = make_checkpoint_upload_callback(uploader, "sft")
-    config = SFTConfig(
-        output_dir=str(args.output_dir),
-        num_train_epochs=args.epochs,
-        learning_rate=args.learning_rate,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        warmup_ratio=args.warmup_ratio,
-        logging_steps=args.logging_steps,
-        save_strategy=args.save_strategy,
-        save_steps=args.save_steps,
-        save_total_limit=args.save_total_limit,
-        eval_strategy="epoch" if eval_enabled else "no",
-        seed=args.seed,
-        data_seed=args.seed,
-        max_length=args.max_length,
-        completion_only_loss=True,
-        # TRL 1.8 defaults to chunked_nll, whose LM-head patch assumes a bound
-        # forward method. PEFT can expose functools.partial for Qwen models.
-        # Standard NLL has the same objective and preserves completion masking.
-        loss_type="nll",
-        packing=args.packing,
-        gradient_checkpointing=args.gradient_checkpointing,
-        bf16=bf16,
-        fp16=fp16,
-        report_to=args.report_to,
-        trust_remote_code=args.trust_remote_code,
-        model_init_kwargs={"dtype": model_dtype},
+    config_kwargs = _compatible_config_kwargs(
+        SFTConfig,
+        {
+            "output_dir": str(args.output_dir),
+            "num_train_epochs": args.epochs,
+            "learning_rate": args.learning_rate,
+            "per_device_train_batch_size": args.batch_size,
+            "per_device_eval_batch_size": args.eval_batch_size,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "warmup_ratio": args.warmup_ratio,
+            "logging_steps": args.logging_steps,
+            "save_strategy": args.save_strategy,
+            "save_steps": args.save_steps,
+            "save_total_limit": args.save_total_limit,
+            "eval_strategy": "epoch" if eval_enabled else "no",
+            "seed": args.seed,
+            "data_seed": args.seed,
+            "max_length": args.max_length,
+            "completion_only_loss": True,
+            # TRL 1.8 defaults to chunked_nll, whose LM-head patch assumes a bound
+            # forward method. PEFT can expose functools.partial for Qwen models.
+            # Standard NLL has the same objective and preserves completion masking.
+            "loss_type": "nll",
+            "packing": args.packing,
+            "gradient_checkpointing": args.gradient_checkpointing,
+            "bf16": bf16,
+            "fp16": fp16,
+            "report_to": args.report_to,
+            "trust_remote_code": args.trust_remote_code,
+            "model_init_kwargs": {"dtype": model_dtype},
+        },
     )
+    config = SFTConfig(**config_kwargs)
     lora = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,

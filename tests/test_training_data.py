@@ -23,7 +23,7 @@ from training.common import (
 )
 from training.artifacts import ArtifactError
 from training.generate_dataset import generate_datasets, generate_records, main
-from training.sft import build_parser
+from training.sft import _compatible_config_kwargs, build_parser
 
 
 class TrainingCommonTests(unittest.TestCase):
@@ -349,6 +349,16 @@ class DatasetGenerationTests(unittest.TestCase):
 
 
 class SftCliTests(unittest.TestCase):
+    def test_sft_config_kwargs_adapt_to_the_installed_trl_signature(self) -> None:
+        def legacy_config(*, output_dir: str, loss_type: str) -> None:
+            return None
+
+        kwargs = _compatible_config_kwargs(
+            legacy_config,
+            {"output_dir": "outputs/sft", "loss_type": "nll", "warmup_ratio": 0.03},
+        )
+        self.assertEqual(kwargs, {"output_dir": "outputs/sft", "loss_type": "nll"})
+
     def test_sft_module_and_parser_do_not_require_ml_dependencies(self) -> None:
         args = build_parser().parse_args([])
         self.assertEqual(args.precision, "auto")
@@ -361,18 +371,9 @@ class SftCliTests(unittest.TestCase):
 
     def test_sft_explicitly_uses_standard_nll_instead_of_trl_default(self) -> None:
         source_path = Path(__file__).resolve().parents[1] / "training" / "sft.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        config_calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "SFTConfig"
-        ]
-        self.assertEqual(len(config_calls), 1)
-        keywords = {keyword.arg: keyword.value for keyword in config_calls[0].keywords}
-        self.assertIn("loss_type", keywords)
-        self.assertEqual(ast.literal_eval(keywords["loss_type"]), "nll")
+        source = source_path.read_text(encoding="utf-8")
+        self.assertIn('"loss_type": "nll"', source)
+        self.assertIn("_compatible_config_kwargs(", source)
 
 
 if __name__ == "__main__":
