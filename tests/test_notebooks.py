@@ -405,6 +405,31 @@ class NotebookWorkflowTests(unittest.TestCase):
             self.base_qwen_hard.index("uploader.complete_run("),
         )
 
+    def test_small_model_notebook_sets_are_model_scoped(self) -> None:
+        workflows = {
+            "qwen2.5_3b_instruct": (
+                "Qwen/Qwen2.5-3B-Instruct",
+                ("eval_base.ipynb", "sft.ipynb", "eval_sft.ipynb", "grpo_hard.ipynb"),
+            ),
+            "gemma3_1b_it": ("google/gemma-3-1b-it", ("eval_base.ipynb",)),
+            "deepseek_r1_distill_qwen_1.5b": (
+                "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+                ("eval_base.ipynb",),
+            ),
+            "ministral3_3b_instruct_2512": (
+                "mistralai/Ministral-3-3B-Instruct-2512",
+                ("eval_base.ipynb",),
+            ),
+        }
+        for slug, (model_id, notebook_names) in workflows.items():
+            for notebook_name in notebook_names:
+                path = Path("notebooks") / slug / notebook_name
+                with self.subTest(path=path):
+                    self.assertTrue(path.is_file())
+                    source = _source(_load(path))
+                    self.assertIn(f'BASE_MODEL = "{model_id}"', source)
+                    self.assertIn(f'MODEL_SLUG = "{slug}"', source)
+
     def test_inter_notebook_contract_is_bucket_and_run_id_not_local_state(self) -> None:
         for source in (self.sft, self.grpo, self.eval):
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)

@@ -2,6 +2,25 @@
 
 Use `Qwen/Qwen2.5-3B-Instruct` for base, SFT, and GRPO. Evaluation is fixed-policy inference with mechanical sandbox execution; no planner, tool agent, or LLM judge is used.
 
+## Model-scoped notebooks
+
+The Qwen folder has `eval_base.ipynb`, `sft.ipynb`, `eval_sft.ipynb`, and
+`grpo_hard.ipynb`. The other folders contain only `eval_base.ipynb`, giving
+comparable base-model baselines before Qwen training. Each evaluation notebook
+generates a distinct timestamped run ID by default.
+
+| Folder | Model | Lab |
+| --- | --- | --- |
+| `notebooks/qwen2.5_3b_instruct/` | `Qwen/Qwen2.5-3B-Instruct` | Alibaba Qwen |
+| `notebooks/gemma3_1b_it/` | `google/gemma-3-1b-it` | Google |
+| `notebooks/deepseek_r1_distill_qwen_1.5b/` | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | DeepSeek |
+| `notebooks/ministral3_3b_instruct_2512/` | `mistralai/Ministral-3-3B-Instruct-2512` | Mistral AI |
+
+Start with the four base evaluations, then use the Qwen folder for SFT, SFT
+evaluation, and GRPO. Gemma 3n is multimodal, so the latest compatible small
+text-only Gemma checkpoint is Gemma 3 1B Instruct. Before running it, accept
+Google's usage license on Hugging Face with the account behind `HF_TOKEN`.
+
 ## 1. Deploy the public sandbox
 
 On the VPS, put `CRASHDIAG_SANDBOX_TOKEN` and `CRASHDIAG_SANDBOX_DOMAIN` in the protected `.env`, then run:
