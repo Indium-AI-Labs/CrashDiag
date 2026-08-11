@@ -75,6 +75,8 @@ class ModelNotebookTests(unittest.TestCase):
         sft_eval = _notebook_source(NOTEBOOK_ROOT / "eval_sft.ipynb")
         for marker in ('dataset_client.download_stage("datasets", DATASET_DIR)', "sft_main([", '"--model", BASE_MODEL'):
             self.assertIn(marker, sft)
+        self.assertIn("TRAINER_COMMIT", sft)
+        self.assertIn("artifact_commit != SOURCE_COMMIT", sft)
         for marker in ("calibrate_main", "SMOKE_GATE_VERIFIED=true", "promotion_gate(", "uploader.complete_run"):
             self.assertIn(marker, grpo)
         for marker in ("SFT_RUN_ID", "SFT adapter/base-model mismatch", '"--model", str(SFT_DIR)'):
