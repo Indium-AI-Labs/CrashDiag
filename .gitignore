@@ -6,6 +6,9 @@ __pycache__/
 artifacts/
 outputs/
 /data/
+!/data/
+/data/*
+!/data/roadmap.md
 wandb/
 .venv/
 .env

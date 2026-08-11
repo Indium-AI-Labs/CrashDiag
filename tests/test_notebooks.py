@@ -15,6 +15,7 @@ NOTEBOOKS = {
     "sft": ROOT / "notebooks" / "sft.ipynb",
     "grpo": ROOT / "notebooks" / "grpo.ipynb",
     "grpo_hard": ROOT / "notebooks" / "grpo_hard.ipynb",
+    "base_qwen_hard": ROOT / "notebooks" / "eval_base_qwen_hard.ipynb",
     "eval": ROOT / "notebooks" / "eval.ipynb",
     "eval_parent_hard": ROOT / "notebooks" / "eval_parent_sft_hard.ipynb",
 }
@@ -126,6 +127,7 @@ class NotebookWorkflowTests(unittest.TestCase):
         eval_notebook = _load(NOTEBOOKS["eval"])
         parent_hard_notebook = _load(NOTEBOOKS["eval_parent_hard"])
         hard_notebook = _load(NOTEBOOKS["grpo_hard"])
+        base_qwen_hard_notebook = _load(NOTEBOOKS["base_qwen_hard"])
         cls.sft = _source(sft_notebook)
         cls.grpo = _source(grpo_notebook)
         cls.eval = _source(eval_notebook)
@@ -136,6 +138,8 @@ class NotebookWorkflowTests(unittest.TestCase):
         cls.eval_code = _code_source(eval_notebook)
         cls.eval_parent_hard_code = _code_source(parent_hard_notebook)
         cls.grpo_hard_code = _code_source(hard_notebook)
+        cls.base_qwen_hard = _source(base_qwen_hard_notebook)
+        cls.base_qwen_hard_code = _code_source(base_qwen_hard_notebook)
 
     def test_hard_grpo_notebook_enforces_calibration_smoke_and_promotion(self) -> None:
         required = (
@@ -365,6 +369,39 @@ class NotebookWorkflowTests(unittest.TestCase):
             self.eval_parent_hard.index("baseline_uploader.upload_files("),
         )
 
+    def test_base_qwen_hard_evaluation_is_signed_and_agent_free(self) -> None:
+        required = (
+            'WORKFLOW_VERSION = "base-qwen-hard-evaluation-v1"',
+            'BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"',
+            'HARD_RUN_ID = os.environ.get("CRASHDIAG_HARD_RUN_ID")',
+            'HARD_SOURCE_COMMIT = os.environ.get("CRASHDIAG_HARD_SOURCE_COMMIT")',
+            'EVALUATOR_COMMIT = os.environ.get("CRASHDIAG_EVALUATOR_COMMIT")',
+            'BASE_QWEN_RUN_ID = os.environ.get("CRASHDIAG_BASE_QWEN_RUN_ID")',
+            'BASE_QWEN_STAGE = "base-qwen-hard-evaluation"',
+            "EXPECTED_ROWS = 192",
+            'required_secret("HF_TOKEN")',
+            'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
+            '"grpo_hard_eval.jsonl"',
+            'hard_manifest.get("runtime", {}).get("git_commit") != HARD_SOURCE_COMMIT',
+            'hard_summary.get("action_contract") != "parameter_free_repairs"',
+            "evaluate_jsonl_main",
+            '"--model", BASE_MODEL',
+            '"--dataset", str(HARD_EVAL_FILE)',
+            '"--artifact-stage", BASE_QWEN_STAGE',
+            "uploader.complete_run(",
+            "display(SVG(filename=str(chart)))",
+        )
+        for marker in required:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.base_qwen_hard)
+        for forbidden in ("BlueAgent", "LocalTransformersAgent", "training.evaluate import", "grpo_main", "sft_main"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, self.base_qwen_hard)
+        self.assertLess(
+            self.base_qwen_hard.index("evaluate_jsonl_main(["),
+            self.base_qwen_hard.index("uploader.complete_run("),
+        )
+
     def test_inter_notebook_contract_is_bucket_and_run_id_not_local_state(self) -> None:
         for source in (self.sft, self.grpo, self.eval):
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
@@ -438,6 +475,11 @@ class NotebookWorkflowTests(unittest.TestCase):
             (
                 "hard_jsonl_evaluation",
                 _literal_flags(self.grpo_hard_code, call_name="evaluate_jsonl_main"),
+                jsonl_evaluation_parser(),
+            ),
+            (
+                "base_qwen_hard_jsonl_evaluation",
+                _literal_flags(self.base_qwen_hard_code, call_name="evaluate_jsonl_main"),
                 jsonl_evaluation_parser(),
             ),
         )
