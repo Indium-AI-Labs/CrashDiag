@@ -4,10 +4,11 @@ Use `Qwen/Qwen2.5-3B-Instruct` for base, SFT, and GRPO. Evaluation is fixed-poli
 
 ## Model-scoped notebooks
 
-The Qwen folder has `eval_base.ipynb`, `sft.ipynb`, `eval_sft.ipynb`, and
-`grpo_hard.ipynb`. The other folders contain only `eval_base.ipynb`, giving
-comparable base-model baselines before Qwen training. Each evaluation notebook
-generates a distinct timestamped run ID by default.
+Each model folder contains only `eval_base.ipynb`, giving comparable baseline
+results. The root-level `notebooks/sft.ipynb`, `notebooks/eval_sft.ipynb`, and
+`notebooks/grpo.ipynb` are generic adapter workflows; select a base model with
+`CRASHDIAG_BASE_MODEL` and a slug with `CRASHDIAG_MODEL_SLUG`. Each evaluation
+notebook generates a distinct timestamped run ID by default.
 
 | Folder | Model | Lab |
 | --- | --- | --- |
@@ -61,11 +62,11 @@ Run all cells. It uploads a signed `base-qwen-evaluation` result for the exact 9
 
 ## 4. Train and evaluate SFT
 
-Run `notebooks/qwen2.5_3b_instruct/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it uses Qwen 2.5 3B. Then run `notebooks/qwen2.5_3b_instruct/eval_sft.ipynb` against the same `grpo_eval.jsonl`.
+Run `notebooks/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it defaults to Qwen 2.5 3B. Then run `notebooks/eval_sft.ipynb` against the same `grpo_eval.jsonl`.
 
 ## 5. Train and evaluate GRPO
 
-Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
+Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/grpo.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
 
 ## 6. Compare
 

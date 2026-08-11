@@ -161,13 +161,13 @@ sessions:
    and automatically uploads the four JSONL files, manifest, and dataset
    `_SUCCESS.json` to the private `devaanshpa/CrashDiag` bucket. Save the
    printed `RUN_ID` and `SOURCE_COMMIT`.
-2. Open [`notebooks/qwen2.5_3b_instruct/sft.ipynb`](notebooks/qwen2.5_3b_instruct/sft.ipynb) in a fresh Kaggle session,
+2. Open [`notebooks/sft.ipynb`](notebooks/sft.ipynb) in a fresh Kaggle session,
    paste those two values, enable Internet and a GPU, and attach only the
    `HF_TOKEN` Kaggle Secret. The notebook checks out the exact source revision,
    downloads and hash-verifies the completed dataset stage, trains SFT
    exclusively from those downloaded files, and displays the generated loss,
    learning-rate, and gradient charts after their signed bucket upload.
-3. Open [`notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb`](notebooks/qwen2.5_3b_instruct/grpo_hard.ipynb) in another fresh Kaggle
+3. Open [`notebooks/grpo.ipynb`](notebooks/grpo.ipynb) in another fresh Kaggle
    session, enable Internet and a GPU, and attach `HF_TOKEN` plus
    `CRASHDIAG_SANDBOX_TOKEN`. Paste the same `RUN_ID` and `SOURCE_COMMIT`, start
    in smoke mode, and proceed to the full run only after checking the displayed
@@ -600,8 +600,10 @@ prevents an LLM hallucination from selecting an arbitrary package version.
 
 ## Repository layout
 
-- `notebooks/qwen2.5_3b_instruct/`: the complete Qwen base-evaluation, SFT,
-  post-SFT evaluation, and hard-GRPO workflow.
+- `notebooks/qwen2.5_3b_instruct/`: the Qwen base-evaluation notebook.
+- `notebooks/sft.ipynb`, `notebooks/eval_sft.ipynb`, and
+  `notebooks/grpo.ipynb`: generic adapter SFT, post-SFT evaluation, and GRPO
+  workflows (Qwen 3B by default; override `CRASHDIAG_BASE_MODEL` as needed).
 - `notebooks/gemma3_1b_it/`, `notebooks/deepseek_r1_distill_qwen_1.5b/`, and
   `notebooks/ministral3_3b_instruct_2512/`: comparable base-evaluation
   notebooks for the other three models.

@@ -14,7 +14,7 @@ NOTEBOOK_ROOT = ROOT / "notebooks"
 MODELS = {
     "qwen2.5_3b_instruct": (
         "Qwen/Qwen2.5-3B-Instruct",
-        {"eval_base.ipynb", "sft.ipynb", "eval_sft.ipynb", "grpo_hard.ipynb"},
+        {"eval_base.ipynb"},
     ),
     "gemma3_1b_it": ("google/gemma-3-1b-it", {"eval_base.ipynb"}),
     "deepseek_r1_distill_qwen_1.5b": (
@@ -37,6 +37,8 @@ class ModelNotebookTests(unittest.TestCase):
     def test_notebooks_directory_contains_exactly_four_model_folders(self) -> None:
         folders = {path.name for path in NOTEBOOK_ROOT.iterdir() if path.is_dir()}
         self.assertEqual(folders, set(MODELS))
+        root_files = {path.name for path in NOTEBOOK_ROOT.iterdir() if path.is_file()}
+        self.assertEqual(root_files, {"sft.ipynb", "eval_sft.ipynb", "grpo.ipynb"})
         for slug, (_, expected_files) in MODELS.items():
             with self.subTest(slug=slug):
                 actual_files = {path.name for path in (NOTEBOOK_ROOT / slug).iterdir() if path.is_file()}
@@ -63,17 +65,18 @@ class ModelNotebookTests(unittest.TestCase):
                     self.assertIn(f'BASE_MODEL = "{model_id}"', source)
                     self.assertIn(f'MODEL_SLUG = "{slug}"', source)
                     self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
-        for name in ("eval_base.ipynb", "sft.ipynb", "eval_sft.ipynb"):
-            source = _notebook_source(NOTEBOOK_ROOT / "qwen2.5_3b_instruct" / name)
+        for name in ("sft.ipynb", "eval_sft.ipynb"):
+            source = _notebook_source(NOTEBOOK_ROOT / name)
             self.assertIn('ZoneInfo("Asia/Kolkata")', source)
 
     def test_qwen_workflow_retains_signed_sft_and_hard_grpo_guards(self) -> None:
-        sft = _notebook_source(NOTEBOOK_ROOT / "qwen2.5_3b_instruct" / "sft.ipynb")
-        grpo = _notebook_source(NOTEBOOK_ROOT / "qwen2.5_3b_instruct" / "grpo_hard.ipynb")
-        sft_eval = _notebook_source(NOTEBOOK_ROOT / "qwen2.5_3b_instruct" / "eval_sft.ipynb")
+        sft = _notebook_source(NOTEBOOK_ROOT / "sft.ipynb")
+        grpo = _notebook_source(NOTEBOOK_ROOT / "grpo.ipynb")
+        sft_eval = _notebook_source(NOTEBOOK_ROOT / "eval_sft.ipynb")
         for marker in ('dataset_client.download_stage("datasets", DATASET_DIR)', "sft_main([", '"--model", BASE_MODEL'):
             self.assertIn(marker, sft)
         for marker in ("calibrate_main", "SMOKE_GATE_VERIFIED=true", "promotion_gate(", "uploader.complete_run"):
             self.assertIn(marker, grpo)
         for marker in ("SFT_RUN_ID", "SFT adapter/base-model mismatch", '"--model", str(SFT_DIR)'):
             self.assertIn(marker, sft_eval)
+        self.assertIn("EXPECTED_BASE_MODEL", grpo)
