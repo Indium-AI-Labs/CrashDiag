@@ -101,7 +101,7 @@ new setup-only sandbox mutations and advertises supported scenario versions:
 ```bash
 cd ~/CrashDiag
 git pull --ff-only origin main
-docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
+docker compose -f compose.yaml -f compose.public.yaml up --detach --build
 curl --fail https://sandbox.devaanshpathak.com/healthz
 ```
 
@@ -591,7 +591,7 @@ CRASHDIAG_SANDBOX_DOMAIN=sandbox.devaanshpathak.com
 Start the sandbox plus the included Caddy TLS proxy:
 
 ```bash
-docker compose -f compose.yaml -f compose.vultr.yaml up --detach --build
+docker compose -f compose.yaml -f compose.public.yaml up --detach --build
 curl --fail https://sandbox.devaanshpathak.com/healthz
 ```
 
@@ -651,7 +651,7 @@ prevents an LLM hallucination from selecting an arbitrary package version.
 - `training/artifacts.py`: private bucket preflight, checkpoint sync, manifests,
   completion markers, and verified download.
 - `Dockerfile`, `compose.yaml`: remote safe sandbox service.
-- `compose.vultr.yaml`, `deploy/vultr/Caddyfile`: HTTPS exposure for Kaggle.
+- `compose.public.yaml`, `deploy/vultr/Caddyfile`: HTTPS exposure for Kaggle.
 - `scripts/train.sh`: optional automated dataset -> SFT -> GRPO -> evaluation
   runner.
 - `tests/`: dependency-free core, data, reward, evaluator, and HTTP integration
