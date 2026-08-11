@@ -372,7 +372,7 @@ class NotebookWorkflowTests(unittest.TestCase):
     def test_base_qwen_evaluation_is_signed_and_agent_free(self) -> None:
         required = (
             'WORKFLOW_VERSION = "base-qwen-evaluation-v1"',
-            'BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"',
+            'BASE_MODEL = "Qwen/Qwen2.5-3B-Instruct"',
             'DATASET_RUN_ID = os.environ.get("CRASHDIAG_DATASET_RUN_ID")',
             'DATASET_SOURCE_COMMIT = os.environ.get("CRASHDIAG_DATASET_SOURCE_COMMIT")',
             'EVALUATOR_COMMIT = os.environ.get("CRASHDIAG_EVALUATOR_COMMIT")',

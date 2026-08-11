@@ -1,51 +1,53 @@
-# CrashDiag clean-start, environment-only roadmap
+# CrashDiag 3B clean-start runbook
 
-## Goal
+Use `Qwen/Qwen2.5-3B-Instruct` for base, SFT, and GRPO. Evaluation is fixed-policy inference with mechanical sandbox execution; no planner, tool agent, or LLM judge is used.
 
-Start with an empty private bucket and keep CrashDiag as a deterministic repair
-environment. Evaluation is fixed-policy inference: one prompt, one JSON action,
-and mechanical sandbox execution. Do not use `training.evaluate`, `BlueAgent`,
-planners, tool loops, or LLM judges.
+## 1. Deploy the public sandbox
 
-## Order of work
+On the VPS, put `CRASHDIAG_SANDBOX_TOKEN` and `CRASHDIAG_SANDBOX_DOMAIN` in the protected `.env`, then run:
 
-1. **Bootstrap the environment.** Deploy the sandbox and verify its health,
-   schema support, and authentication before any model result is recorded.
-2. **Generate a fresh standard dataset.** Run `training.generate_dataset` on a
-   trusted machine. Save the printed `RUN_ID` and `SOURCE_COMMIT`; its signed
-   `datasets` stage contains `grpo_eval.jsonl` with 96 answer-free rows.
-3. **Evaluate base Qwen first.** Open `notebooks/eval_base_qwen_hard.ipynb` in
-   Kaggle, set `CRASHDIAG_DATASET_RUN_ID`, `CRASHDIAG_DATASET_SOURCE_COMMIT`,
-   and a new `CRASHDIAG_BASE_QWEN_RUN_ID`, then run all cells. It evaluates
-   `Qwen/Qwen2.5-1.5B-Instruct` with `training.evaluate_jsonl` and uploads a
-   separate signed `base-qwen-evaluation` stage.
-4. **Train SFT.** Run `notebooks/sft.ipynb` using the same fresh dataset run.
-   It produces the parent SFT adapter without completing the whole dataset run.
-5. **Evaluate SFT.** In a new evaluation-only run, download and verify the SFT
-   adapter, then evaluate it on the exact same signed `grpo_eval.jsonl` with
-   the same evaluator commit, precision, and `--max-new-tokens 96` as base
-   Qwen.
-6. **Generate hard data and train GRPO.** The hard-data generator requires the
-   signed SFT parent, so this cannot happen before step 4. Generate a fresh
-   hard-data run, run calibration and smoke checks, then train GRPO in a new
-   training run.
-7. **Evaluate GRPO and compare.** Evaluate base Qwen, SFT, and GRPO on both the
-   signed hard split and the 96-row regression split. Use separate stages for
-   every model/split and publish one signed comparison report.
+```bash
+cd ~/CrashDiag
+docker compose -f compose.yaml -f compose.public.yaml up --detach --build
+curl --fail https://sandbox.devaanshpathak.com/healthz
+```
 
-## Required fairness controls
+Store that same sandbox token and a separate `HF_TOKEN` as Kaggle secrets.
 
-Every model in one comparison must use the same signed dataset manifest,
-evaluator commit, sandbox deployment, `--max-new-tokens 96`, and deterministic
-temperature-zero generation. Record model name, adapter SHA-256 when present,
-data manifest SHA-256, per-row mechanical results, strict-JSON rate, and
-backend-error rate.
+## 2. Generate the fresh standard dataset
 
-## Decision gates
+On a trusted machine with `HF_TOKEN` and bucket settings in `.env`:
 
-- Stop and repair the environment if backend-error rate is nonzero.
-- Do not compare a stage whose signed dataset or model manifest differs.
-- Treat base-Qwen, SFT, and GRPO as separate fixed policies; only their
-  mechanical resolution rates and per-fault deltas determine comparison.
-- Preserve each completed experiment run. Start a new run ID for any retrain
-  rather than overwriting a benchmark result.
+```powershell
+python -m pip install -e ".[artifacts]"
+python -m training.generate_dataset `
+  --train-samples-per-fault 128 `
+  --eval-samples-per-fault 16 `
+  --seed 42
+```
+
+Copy the printed `RUN_ID` and `SOURCE_COMMIT`. The signed dataset stage contains 768 training and 96 evaluation rows.
+
+## 3. Evaluate base Qwen 3B
+
+Open `notebooks/eval_base_qwen_hard.ipynb` in a fresh Kaggle GPU session. Set:
+
+```text
+CRASHDIAG_DATASET_RUN_ID=<dataset RUN_ID>
+CRASHDIAG_DATASET_SOURCE_COMMIT=<dataset SOURCE_COMMIT>
+CRASHDIAG_BASE_QWEN_RUN_ID=<new unique base-eval ID>
+```
+
+Run all cells. It uploads a signed `base-qwen-evaluation` result for the exact 96 rows.
+
+## 4. Train and evaluate SFT
+
+Run `notebooks/sft.ipynb` with the same dataset `RUN_ID` and `SOURCE_COMMIT`; it now uses Qwen 2.5 3B. Download its signed adapter and evaluate it with `training.evaluate_jsonl` on the same `grpo_eval.jsonl`, temperature zero and `--max-new-tokens 96`, into a new evaluation-only run.
+
+## 5. Train and evaluate GRPO
+
+Generate hard data after signed SFT exists, pass calibration and the smoke gate, then run `notebooks/grpo_hard.ipynb`. Evaluate final GRPO on both its hard split and the original 96-row regression split with the same evaluator commit, sandbox, data manifests, and generation settings.
+
+## 6. Compare
+
+Publish one signed comparison artifact with raw per-row outcomes, overall/per-fault success, strict-JSON and backend-error rates, adapter SHA-256 values, evaluator commit, and data manifest SHA-256. Do not compare mismatched manifests, deployments, or settings.
