@@ -377,6 +377,7 @@ class NotebookWorkflowTests(unittest.TestCase):
             'DATASET_SOURCE_COMMIT = os.environ.get("CRASHDIAG_DATASET_SOURCE_COMMIT")',
             'EVALUATOR_COMMIT = os.environ.get("CRASHDIAG_EVALUATOR_COMMIT")',
             'BASE_QWEN_RUN_ID = os.environ.get("CRASHDIAG_BASE_QWEN_RUN_ID")',
+            'ZoneInfo("Asia/Kolkata")',
             'BASE_QWEN_STAGE = "base-qwen-evaluation"',
             "EXPECTED_ROWS = 96",
             'required_secret("HF_TOKEN")',
