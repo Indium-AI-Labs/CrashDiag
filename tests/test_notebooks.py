@@ -369,24 +369,23 @@ class NotebookWorkflowTests(unittest.TestCase):
             self.eval_parent_hard.index("baseline_uploader.upload_files("),
         )
 
-    def test_base_qwen_hard_evaluation_is_signed_and_agent_free(self) -> None:
+    def test_base_qwen_evaluation_is_signed_and_agent_free(self) -> None:
         required = (
-            'WORKFLOW_VERSION = "base-qwen-hard-evaluation-v1"',
+            'WORKFLOW_VERSION = "base-qwen-evaluation-v1"',
             'BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"',
-            'HARD_RUN_ID = os.environ.get("CRASHDIAG_HARD_RUN_ID")',
-            'HARD_SOURCE_COMMIT = os.environ.get("CRASHDIAG_HARD_SOURCE_COMMIT")',
+            'DATASET_RUN_ID = os.environ.get("CRASHDIAG_DATASET_RUN_ID")',
+            'DATASET_SOURCE_COMMIT = os.environ.get("CRASHDIAG_DATASET_SOURCE_COMMIT")',
             'EVALUATOR_COMMIT = os.environ.get("CRASHDIAG_EVALUATOR_COMMIT")',
             'BASE_QWEN_RUN_ID = os.environ.get("CRASHDIAG_BASE_QWEN_RUN_ID")',
-            'BASE_QWEN_STAGE = "base-qwen-hard-evaluation"',
-            "EXPECTED_ROWS = 192",
+            'BASE_QWEN_STAGE = "base-qwen-evaluation"',
+            "EXPECTED_ROWS = 96",
             'required_secret("HF_TOKEN")',
             'required_secret("CRASHDIAG_SANDBOX_TOKEN")',
-            '"grpo_hard_eval.jsonl"',
-            'hard_manifest.get("runtime", {}).get("git_commit") != HARD_SOURCE_COMMIT',
-            'hard_summary.get("action_contract") != "parameter_free_repairs"',
+            '"grpo_eval.jsonl"',
+            'dataset_manifest.get("runtime", {}).get("git_commit") != DATASET_SOURCE_COMMIT',
             "evaluate_jsonl_main",
             '"--model", BASE_MODEL',
-            '"--dataset", str(HARD_EVAL_FILE)',
+            '"--dataset", str(EVAL_FILE)',
             '"--artifact-stage", BASE_QWEN_STAGE',
             "uploader.complete_run(",
             "display(SVG(filename=str(chart)))",
