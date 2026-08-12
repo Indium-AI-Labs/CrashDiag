@@ -40,6 +40,11 @@ from .common import (
     observation_messages,
     write_jsonl,
 )
+from .hard_scenarios import (
+    HARD_SCENARIO_PROFILES,
+    hard_expert_action,
+    prepare_hard_scenario,
+)
 
 
 SCHEMA_VERSION = 1
@@ -134,73 +139,29 @@ def prepare_scenario(
 
     if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
         raise TypeError("scenario_seed must be an integer")
-    fault = fault_for_name(fault_name)
-    rng = random.Random(scenario_seed)
-    target = sandbox if sandbox is not None else MockSandbox()
-    _prepare_background_state(target, rng)
-    _vary_fault(fault, rng)
-    fault.inject(target)
-    if fault.is_resolved(target):
-        raise RuntimeError(f"fault {fault_name!r} was resolved immediately after injection")
-    health = target.health_check()
-    if not isinstance(health, Mapping) or health.get("healthy") is not False:
-        raise RuntimeError(f"fault {fault_name!r} did not make the sandbox unhealthy")
-    return fault, target, rng
+    # Version 1 now uses the formerly separate hardened scenario construction:
+    # redacted telemetry, shifted deployment baselines, repaired decoys, and a
+    # recent ineffective remediation.  The profile is deterministically derived
+    # from the stable v1 sample seed, so a row can be replayed from the same
+    # top-level schema-v1 identity without serializing hidden scenario labels.
+    profile = HARD_SCENARIO_PROFILES[scenario_seed % len(HARD_SCENARIO_PROFILES)]
+    return prepare_hard_scenario(
+        fault_name,
+        scenario_seed,
+        profile,
+        sandbox=sandbox,
+    )
 
 
-def expert_action(fault_name: str, sandbox: MockSandbox, rng: random.Random) -> dict[str, Any]:
-    """Return the deterministic one-step expert action for an injected fault."""
+def expert_action(
+    fault_name: str,
+    sandbox: MockSandbox | SandboxBackend,
+    rng: random.Random | None,
+) -> dict[str, Any]:
+    """Return the parameter-free repair proved by the hardened v1 scenario."""
 
-    if fault_name == "oom_kill":
-        return {"action": "restart_app", "parameters": {}}
-    if fault_name == "bad_env_var":
-        return {"action": "rollback_env_var", "parameters": {"name": "APP_ENV"}}
-    if fault_name == "broken_db_connection":
-        return {
-            "action": "rollback_env_var",
-            "parameters": {"name": "DATABASE_URL"},
-        }
-    if fault_name == "dependency_mismatch":
-        dependency = "web-framework"
-        return {
-            "action": "fix_dependency",
-            "parameters": {
-                "name": dependency,
-                "version": sandbox.required_dependencies[dependency],
-            },
-        }
-    if fault_name == "disk_full":
-        # Keep the target clearly below the mock's 90% health boundary while
-        # varying the exact corrective action seen during SFT.
-        return {
-            "action": "clear_disk",
-            "parameters": {"target_percent": rng.choice((25.0, 35.0, 40.0, 50.0, 70.0))},
-        }
-    if fault_name == "port_proxy_misconfig":
-        return {
-            "action": "fix_port_config",
-            "parameters": {"target_port": sandbox.app_port},
-        }
-    if fault_name in {
-        "missing_secret",
-        "feature_flag_misconfiguration",
-        "redis_connection_failure",
-        "message_queue_connection_failure",
-        "object_storage_credentials_failure",
-    }:
-        return {"action": "rollback_env_var", "parameters": {}}
-    service_actions = {
-        "cache_corruption": "clear_cache",
-        "tls_certificate_failure": "renew_tls_certificate",
-        "file_permission_failure": "restore_file_permissions",
-        "schema_migration_pending": "apply_database_migration",
-        "database_pool_exhaustion": "reset_database_pool",
-        "dns_resolution_failure": "restore_dns_configuration",
-        "rate_limit_misconfiguration": "restore_rate_limit_configuration",
-    }
-    if fault_name in service_actions:
-        return {"action": service_actions[fault_name], "parameters": {}}
-    raise ValueError(f"no expert action for fault {fault_name!r}")
+    del sandbox, rng
+    return hard_expert_action(fault_name)
 
 
 def build_validated_sample(

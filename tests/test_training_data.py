@@ -23,6 +23,7 @@ from training.common import (
 )
 from training.artifacts import ArtifactError
 from training.generate_dataset import generate_datasets, generate_records, main
+from training.generate_dataset import expert_action, prepare_scenario
 from training.sft import _compatible_config_kwargs, build_parser
 
 
@@ -77,6 +78,10 @@ class DatasetGenerationTests(unittest.TestCase):
             self.assertEqual(sft["prompt"], grpo["prompt"])
             self.assertEqual(sft["sample_seed"], grpo["sample_seed"])
             self.assertEqual(sft["prompt"][0], {"role": "system", "content": SYSTEM_PROMPT})
+            prompt_text = sft["prompt"][1]["content"]
+            self.assertNotIn('"expected"', prompt_text)
+            self.assertNotIn('"required"', prompt_text)
+            self.assertNotIn('"healthy_below_percent"', prompt_text)
             self.assertTrue(sft["metadata"]["mechanically_validated"])
             self.assertNotIn("completion", grpo)
             self.assertNotIn("answer", grpo)
@@ -95,6 +100,18 @@ class DatasetGenerationTests(unittest.TestCase):
             target = parse_action(completion_text(sft["completion"]))
             self.assertIn(target["action"], ACTION_SPACE)
             self.assertNotEqual(target["action"], "wait_and_observe")
+            self.assertEqual(target["parameters"], {})
+
+    def test_default_v1_scenarios_are_hardened_and_replay_with_parameter_free_repairs(self) -> None:
+        for fault_name in FAULT_NAMES:
+            fault, sandbox, _ = prepare_scenario(fault_name, 1729)
+            observation = sandbox.observe()
+            self.assertFalse(observation["health"]["healthy"])
+            target = expert_action(fault_name, sandbox, None)
+            self.assertEqual(target["parameters"], {})
+            sandbox.execute_action(target["action"], target["parameters"])
+            self.assertTrue(fault.is_resolved(sandbox))
+            self.assertTrue(sandbox.health_check()["healthy"])
 
     def test_generation_is_byte_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

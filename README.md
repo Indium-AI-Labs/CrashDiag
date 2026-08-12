@@ -13,7 +13,8 @@ evaluation so the policy produces only the required action JSON.
 
 - 18 injectable, mechanically repairable fault families.
 - Mock and HTTP sandbox backends, Docker deployment, and public Compose overlay.
-- Standard SFT/GRPO data generator plus redacted/noisy hard GRPO curriculum.
+- One hardened v1 SFT/GRPO curriculum with redacted telemetry, shifted baselines,
+  repaired decoy incidents, and mechanically replayable rewards.
 - QLoRA SFT, GRPO, exact held-out evaluation, reports, and private Hugging Face
   Storage Bucket artifact persistence.
 - Four notebooks only: base evaluation, SFT, SFT evaluation, and GRPO at
@@ -36,7 +37,7 @@ docker compose -f compose.yaml -f compose.public.yaml up --detach --build
 curl.exe --fail https://sandbox.example.com/healthz
 ```
 
-Generate fresh standard data (64 train and 8 eval variations per fault):
+Generate fresh hardened-v1 data (64 train and 8 eval variations per fault):
 
 ```powershell
 python -m pip install -e ".[artifacts]"
@@ -44,7 +45,7 @@ python -m training.generate_dataset --train-samples-per-fault 64 --eval-samples-
 ```
 
 See [data/roadmap.md](data/roadmap.md) for the complete deployment, base-eval,
-SFT, GRPO, hard-curriculum, and final-evaluation sequence.
+base evaluation, SFT, GRPO, and final-evaluation sequence.
 
 ## Validation
 

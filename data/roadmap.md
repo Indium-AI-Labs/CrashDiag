@@ -19,11 +19,14 @@ Keep these environment values only in the ignored `.env`:
 long-lived secret for this disposable sandbox deployment; it is not committed
 or passed on a notebook command line.
 
-## 2. Generate the fresh standard data
+## 2. Generate the fresh hardened-v1 data
 
 On a trusted machine with `.env` loaded, install just the artifact tools and
-generate the standard 18-fault dataset. This uploads one fresh `datasets`
-stage to the private `devaanshpa/CrashDiag` bucket.
+generate the hardened-v1, 18-fault dataset. This uploads one fresh `datasets`
+stage to the private `devaanshpa/CrashDiag` bucket. Each prompt contains
+redacted telemetry, shifted deployment baselines, repaired decoy incidents,
+and a recent ineffective remediation; the hidden repair is still mechanically
+replayed from the v1 row identity.
 
 ```powershell
 python -m pip install -e ".[artifacts]"
@@ -66,19 +69,9 @@ SFT adapter, uses BF16 NF4 QLoRA, runs a 24-step smoke
 stage, then a separate 96-step GRPO stage using two generations. Copy the
 printed `GRPO_RUN_ID` after the final `grpo` stage has uploaded successfully.
 
-For the harder redacted/noisy curriculum, generate a new hard dataset after SFT
-has completed:
-
-```powershell
-python -m training.generate_grpo_hard --parent-sft-run-id <SFT_RUN_ID> --train-samples-per-fault 24 --eval-samples-per-fault 8 --seed 42
-```
-
-That run contains 432 hard training rows and 144 hard evaluation rows across
-the same 18 fault families.
-
 Set `CRASHDIAG_GRPO_RUN_ID` to the completed GRPO training run ID and run
 `notebooks/qwen3_14b/eval_grpo.ipynb`. It downloads the signed final `grpo`
-adapter and the standard held-out dataset, evaluates all rows with live
+adapter and the hardened-v1 held-out dataset, evaluates all rows with live
 cumulative progress, displays the generated SVG graphs, and uploads the report
 under a fresh `grpo-eval` run ID. Set `CRASHDIAG_GRPO_EVAL_RUN_ID` only when an
 explicit new evaluation ID is desired; never reuse a completed ID.

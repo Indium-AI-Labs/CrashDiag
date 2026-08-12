@@ -409,7 +409,7 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
             _, local_sandbox, _ = prepare_scenario("port_proxy_misconfig", seed)
             prompt = observation_messages(local_sandbox.observe())
             rewards = mechanical_reward(
-                ['{"action":"fix_port_config","parameters":{"target_port":8080}}'],
+                ['{"action":"fix_port_config","parameters":{}}'],
                 fault_name=["port_proxy_misconfig"],
                 sample_seed=[seed],
                 prompts=[prompt],

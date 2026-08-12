@@ -9,13 +9,34 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from crashdiag.agents import DEFAULT_SYSTEM_PROMPT
 from crashdiag.faults.base import FaultModule
 from crashdiag.faults.modules import FAULT_TYPES
 
 
-SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
-"""The policy contract used for both offline data and online rollouts."""
+SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
+Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
+Choose exactly one action from this list:
+- restart_app
+- rollback_env_var
+- fix_dependency
+- clear_disk
+- fix_port_config
+- clear_cache
+- renew_tls_certificate
+- restore_file_permissions
+- apply_database_migration
+- reset_database_pool
+- restore_dns_configuration
+- restore_rate_limit_configuration
+- wait_and_observe
+
+Reply with one JSON object only, using this schema:
+{"action": "<action name>", "parameters": {}}
+For this sandbox, each repair action restores its target from deployment history or declared
+configuration. The parameters value must therefore be exactly {}. Never guess or emit names,
+versions, ports, or thresholds. Do not use markdown or prose.
+"""
+"""The parameter-free policy contract used for all v1 data and rollouts."""
 
 _FAULT_CLASSES = {fault_type().name: fault_type for fault_type in FAULT_TYPES}
 FAULT_NAMES = tuple(_FAULT_CLASSES)
@@ -87,10 +108,14 @@ def completion_text(value: Any) -> str:
 
 
 def observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Build the conversational prompt consumed by BlueAgent-compatible models."""
+    """Build the redacted operational prompt used by the v1 curriculum."""
+
+    # Keep the prompt projection beside the legacy common helpers while avoiding
+    # an import cycle: ``hard_scenarios`` imports ``fault_for_name`` above.
+    from .hard_scenarios import hard_observation
 
     content = json.dumps(
-        {"observation": observation},
+        {"observation": hard_observation(observation)},
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
