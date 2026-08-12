@@ -164,6 +164,7 @@ def train(args: argparse.Namespace) -> Any:
             "output_dir": str(args.output_dir),
             "num_train_epochs": args.epochs,
             "learning_rate": args.learning_rate,
+            "optim": "paged_adamw_8bit" if args.load_in_4bit else "adamw_torch",
             "per_device_train_batch_size": args.batch_size,
             "per_device_eval_batch_size": args.eval_batch_size,
             "gradient_accumulation_steps": args.gradient_accumulation_steps,
@@ -210,7 +211,7 @@ def train(args: argparse.Namespace) -> Any:
         quantization = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=model_dtype,
             bnb_4bit_use_double_quant=True,
         )
         model = AutoModelForCausalLM.from_pretrained(

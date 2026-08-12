@@ -5,8 +5,8 @@ repair policy. A policy selects one bounded JSON action; a disposable sandbox
 executes it and determines reward from real state and health checks. No LLM
 grader is used.
 
-The fresh workflow trains a single model, `Qwen/Qwen3-14B`, with NF4 4-bit
-QLoRA on two Kaggle T4 GPUs. Qwen3 thinking is disabled in training and
+The fresh workflow trains a single model, `Qwen/Qwen3-14B`, with BF16 NF4
+4-bit QLoRA on one 40 GB A100. Qwen3 thinking is disabled in training and
 evaluation so the policy produces only the required action JSON.
 
 ## Included
@@ -21,7 +21,7 @@ evaluation so the policy produces only the required action JSON.
 
 ## Setup
 
-Keep secrets in the ignored `.env` or Kaggle Secrets, never in code:
+Keep secrets in the ignored `.env`, never in code:
 
 ```text
 HF_TOKEN=...

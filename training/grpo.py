@@ -368,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--num-generations", type=int, default=4)
+    parser.add_argument("--max-prompt-length", type=int, default=1024)
     parser.add_argument("--max-completion-length", type=int, default=96)
     parser.add_argument("--temperature", type=float, default=0.9)
     parser.add_argument("--top-p", type=float, default=1.0)
@@ -423,6 +424,7 @@ def _validate_positive(args: argparse.Namespace) -> None:
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "num_generations": args.num_generations,
         "max_completion_length": args.max_completion_length,
+        "max_prompt_length": args.max_prompt_length,
         "temperature": args.temperature,
         "logging_steps": args.logging_steps,
         "save_steps": args.save_steps,
@@ -615,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
                 quantization_config=BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_compute_dtype=dtype,
                     bnb_4bit_use_double_quant=True,
                 ),
                 device_map={"": local_rank},
@@ -660,11 +662,13 @@ def main(argv: list[str] | None = None) -> int:
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
         learning_rate=args.learning_rate,
+        optim="paged_adamw_8bit" if args.load_in_4bit else "adamw_torch",
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_generations=args.num_generations,
         max_completion_length=args.max_completion_length,
+        max_prompt_length=args.max_prompt_length,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,

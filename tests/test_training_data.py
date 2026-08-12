@@ -374,6 +374,7 @@ class SftCliTests(unittest.TestCase):
         source = source_path.read_text(encoding="utf-8")
         self.assertIn('"loss_type": "nll"', source)
         self.assertIn('"ddp_find_unused_parameters": False', source)
+        self.assertIn('"paged_adamw_8bit" if args.load_in_4bit', source)
         self.assertIn("cast_trainable_parameters_to_fp32(trainer.model)", source)
         self.assertIn("_compatible_config_kwargs(", source)
 
