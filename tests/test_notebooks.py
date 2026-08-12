@@ -43,13 +43,16 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn("UserSecretsClient", source)
             self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
             self.assertNotIn("ArtifactConfig.from_env", source)
+            self.assertNotIn('"--artifact-run-id"', source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
+        self.assertIn('"--num_processes", "2"', _source(MODEL_DIR / "sft.ipynb"))
         grpo = _source(MODEL_DIR / "grpo.ipynb")
         self.assertIn('"--num_processes", "2"', grpo)
         self.assertIn('"--max-steps", "24"', grpo)
         self.assertIn('"96"', grpo)
-        for name in ("eval_base.ipynb", "eval_sft.ipynb", "grpo.ipynb"):
+        self.assertNotIn('"--artifact-stage"', _source(MODEL_DIR / "sft.ipynb"))
+        for name in NOTEBOOKS:
             source = _source(MODEL_DIR / name)
             self.assertIn("display(SVG", source)
             self.assertIn('"reports"', source)
