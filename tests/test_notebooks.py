@@ -40,6 +40,8 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn('BASE_MODEL = "Qwen/Qwen3-14B"', source)
             self.assertIn('MODEL_SLUG = "qwen3_14b"', source)
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
+            self.assertIn("UserSecretsClient", source)
+            self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
         grpo = _source(MODEL_DIR / "grpo.ipynb")
