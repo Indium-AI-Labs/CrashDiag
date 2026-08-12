@@ -37,6 +37,7 @@ from .hard_scenarios import (
     prepare_hard_scenario,
 )
 from .reporting import ReportBundle, generate_trainer_report
+from .qlora import prepare_4bit_qlora_model
 
 _SANDBOX_URL = os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip()
 _SANDBOX_TOKEN = os.environ.get("CRASHDIAG_API_TOKEN") or os.environ.get(
@@ -562,7 +563,6 @@ def main(argv: list[str] | None = None) -> int:
             LoraConfig,
             PeftConfig,
             PeftModel,
-            prepare_model_for_kbit_training,
         )
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from trl import GRPOConfig, GRPOTrainer
@@ -621,9 +621,8 @@ def main(argv: list[str] | None = None) -> int:
                 device_map={"": local_rank},
                 trust_remote_code=args.trust_remote_code,
             )
-            base_model.config.use_cache = False
             model = PeftModel.from_pretrained(
-                prepare_model_for_kbit_training(base_model),
+                prepare_4bit_qlora_model(base_model),
                 args.model,
                 is_trainable=True,
             )

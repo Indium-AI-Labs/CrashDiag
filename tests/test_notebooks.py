@@ -47,6 +47,7 @@ class ModelNotebookTests(unittest.TestCase):
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--num_processes", "2"', _source(MODEL_DIR / "sft.ipynb"))
+        self.assertIn('"--mixed_precision", "fp16"', _source(MODEL_DIR / "sft.ipynb"))
         grpo = _source(MODEL_DIR / "grpo.ipynb")
         self.assertIn('"--num_processes", "2"', grpo)
         self.assertIn('"--max-steps", "24"', grpo)

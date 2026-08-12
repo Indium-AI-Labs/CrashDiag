@@ -26,6 +26,7 @@ from .artifacts import (
 )
 from .common import PRECISION_CHOICES, resolve_precision
 from .reporting import ReportBundle, generate_trainer_report
+from .qlora import prepare_4bit_qlora_model
 
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -109,7 +110,7 @@ def train(args: argparse.Namespace) -> Any:
     try:
         import torch
         from datasets import load_dataset
-        from peft import LoraConfig, TaskType, prepare_model_for_kbit_training
+        from peft import LoraConfig, TaskType
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from trl import SFTConfig, SFTTrainer
     except ImportError as exc:
@@ -217,10 +218,9 @@ def train(args: argparse.Namespace) -> Any:
             device_map={"": local_rank},
             trust_remote_code=args.trust_remote_code,
         )
-        model.config.use_cache = False
-        model = prepare_model_for_kbit_training(
+        model = prepare_4bit_qlora_model(
             model,
-            use_gradient_checkpointing=args.gradient_checkpointing,
+            gradient_checkpointing=args.gradient_checkpointing,
         )
     trainer = SFTTrainer(
         model=model,
