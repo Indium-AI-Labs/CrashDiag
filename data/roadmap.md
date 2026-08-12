@@ -63,7 +63,8 @@ adapter, evaluates the same 144 rows, and uploads a separate `sft-eval` stage.
 With both `CRASHDIAG_DATASET_RUN_ID` and `CRASHDIAG_SFT_RUN_ID` set, run
 `notebooks/qwen3_14b/grpo.ipynb` in a fresh single-A100 session. It starts from the
 SFT adapter, uses BF16 NF4 QLoRA, runs a 24-step smoke
-stage, then a separate 96-step GRPO stage using four generations.
+stage, then a separate 96-step GRPO stage using two generations. Copy the
+printed `GRPO_RUN_ID` after the final `grpo` stage has uploaded successfully.
 
 For the harder redacted/noisy curriculum, generate a new hard dataset after SFT
 has completed:
@@ -73,6 +74,11 @@ python -m training.generate_grpo_hard --parent-sft-run-id <SFT_RUN_ID> --train-s
 ```
 
 That run contains 432 hard training rows and 144 hard evaluation rows across
-the same 18 fault families. Evaluate the GRPO adapter with `evaluate_jsonl`
-using `--load-in-4bit` against both the normal and hard held-out datasets; each
-evaluation is uploaded under its own fresh run ID.
+the same 18 fault families.
+
+Set `CRASHDIAG_GRPO_RUN_ID` to the completed GRPO training run ID and run
+`notebooks/qwen3_14b/eval_grpo.ipynb`. It downloads the signed final `grpo`
+adapter and the standard held-out dataset, evaluates all rows with live
+cumulative progress, displays the generated SVG graphs, and uploads the report
+under a fresh `grpo-eval` run ID. Set `CRASHDIAG_GRPO_EVAL_RUN_ID` only when an
+explicit new evaluation ID is desired; never reuse a completed ID.

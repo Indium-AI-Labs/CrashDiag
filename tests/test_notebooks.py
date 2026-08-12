@@ -12,7 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_ROOT = ROOT / "notebooks"
 MODEL_DIR = NOTEBOOK_ROOT / "qwen3_14b"
-NOTEBOOKS = {"eval_base.ipynb", "sft.ipynb", "eval_sft.ipynb", "grpo.ipynb"}
+NOTEBOOKS = {
+    "eval_base.ipynb",
+    "sft.ipynb",
+    "eval_sft.ipynb",
+    "grpo.ipynb",
+    "eval_grpo.ipynb",
+}
 
 
 def _source(path: Path) -> str:
@@ -42,7 +48,7 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
             self.assertIn("load_dotenv", source)
             self.assertIn("CRASHDIAG_ENV_FILE", source)
-            if name == "eval_sft.ipynb":
+            if name in {"eval_sft.ipynb", "eval_grpo.ipynb"}:
                 self.assertIn("UserSecretsClient", source)
                 self.assertIn("kaggle_secrets", source)
             else:
@@ -70,6 +76,15 @@ class ModelNotebookTests(unittest.TestCase):
         self.assertIn("kaggle_secret_errors", source)
         self.assertIn("loaded Kaggle secret names", source)
         self.assertIn("if ENV_FILE.is_file()", source)
+
+    def test_grpo_eval_downloads_final_adapter_and_uploads_live_reports(self) -> None:
+        source = _source(MODEL_DIR / "eval_grpo.ipynb")
+        self.assertIn('"GRPO_RUN_ID": "CRASHDIAG_GRPO_RUN_ID"', source)
+        self.assertIn('download_stage("grpo", GRPO_DIR)', source)
+        self.assertIn('"--model", str(GRPO_DIR)', source)
+        self.assertIn('"--artifact-stage", "grpo-eval"', source)
+        self.assertIn("evaluate_main", source)
+        self.assertIn("loaded Kaggle secret names", source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--max-length", "2048"', _source(MODEL_DIR / "sft.ipynb"))
