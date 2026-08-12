@@ -66,6 +66,9 @@ class ModelNotebookTests(unittest.TestCase):
         ):
             self.assertIn(key, source)
         self.assertIn("CRASHDIAG_SANDBOX_TOKEN", source)
+        self.assertIn('"SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID"', source)
+        self.assertIn("kaggle_secret_errors", source)
+        self.assertIn("loaded Kaggle secret names", source)
         self.assertIn("if ENV_FILE.is_file()", source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
