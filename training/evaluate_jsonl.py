@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -60,8 +60,11 @@ def evaluate_rows(
     generate_one: Any,
     *,
     max_rows: int | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     selected = list(rows if max_rows is None else rows[:max_rows])
+    emit = progress or (lambda message: print(message, flush=True))
+    emit(f"Starting evaluation: {len(selected)} rows")
     results: list[dict[str, Any]] = []
     for index, row in enumerate(selected):
         prompt = row.get("prompt")
@@ -98,6 +101,13 @@ def evaluate_rows(
                 "backend_error": bool(extras["crashdiag_backend_error"][0]),
                 "strict_json": bool(extras["crashdiag_strict_json"][0]),
             }
+        )
+        resolved = sum(bool(item["resolved"]) for item in results)
+        backend_errors = sum(bool(item["backend_error"]) for item in results)
+        emit(
+            f"[{index + 1}/{len(selected)}] fault={row.get('fault_name')} "
+            f"resolved={resolved} success_rate={resolved / len(results):.1%} "
+            f"backend_errors={backend_errors}"
         )
     return summarize_results(results)
 
