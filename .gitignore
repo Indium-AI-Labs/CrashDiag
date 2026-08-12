@@ -13,4 +13,5 @@ wandb/
 .venv/
 .env
 env.txt
+data/roadmap.md
 /roadmap.md
