@@ -396,6 +396,27 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
             "signals": ["sensor-04:amber", "sensor-11:amber", "sensor-19:nominal"],
             "sample_clock": ticks,
         },
+        # Preserve a small amount of semantically meaningful evidence so a
+        # capable base model has a measurable floor. Raw values and known-good
+        # configuration remain withheld; decoy history still prevents keyword
+        # matching from being sufficient.
+        "evidence": {
+            "process_running": bool(observation.get("process", {}).get("running", True)),
+            "last_exit_reason": observation.get("process", {}).get("last_exit_reason"),
+            "dependency_anomaly": _active_fault_name(observation) == "dependency_mismatch",
+            "environment_anomaly": _active_fault_name(observation) in {
+                "bad_env_var", "broken_db_connection", "missing_secret",
+                "feature_flag_misconfiguration", "redis_connection_failure",
+                "message_queue_connection_failure", "object_storage_credentials_failure",
+            },
+            "storage_pressure": _active_fault_name(observation) == "disk_full",
+            "routing_anomaly": _active_fault_name(observation) == "port_proxy_misconfig",
+            "service_anomaly": _active_fault_name(observation) in {
+                "cache_corruption", "tls_certificate_failure", "file_permission_failure",
+                "schema_migration_pending", "database_pool_exhaustion",
+                "dns_resolution_failure", "rate_limit_misconfiguration",
+            },
+        },
     }
 
 
