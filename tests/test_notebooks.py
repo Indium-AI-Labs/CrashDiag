@@ -88,7 +88,7 @@ class ModelNotebookTests(unittest.TestCase):
         self.assertIn("evaluate_main", source)
         self.assertIn("loaded Kaggle secret names", source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
-        self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
+        self.assertIn('"--epochs", "1"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--max-length", "2048"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--lora-rank", "16"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--num_processes", "1"', _source(MODEL_DIR / "sft.ipynb"))
