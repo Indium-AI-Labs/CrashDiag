@@ -79,6 +79,27 @@ _OPAQUE_SIGNATURES = {
     "rate_limit_misconfiguration": "sig-65a0",
 }
 
+_ACTION_BY_FAULT = {
+    "oom_kill": "restart_app", "bad_env_var": "rollback_env_var",
+    "broken_db_connection": "rollback_env_var", "dependency_mismatch": "fix_dependency",
+    "disk_full": "clear_disk", "port_proxy_misconfig": "fix_port_config",
+    "missing_secret": "rollback_env_var", "feature_flag_misconfiguration": "rollback_env_var",
+    "redis_connection_failure": "rollback_env_var", "message_queue_connection_failure": "rollback_env_var",
+    "object_storage_credentials_failure": "rollback_env_var", "cache_corruption": "clear_cache",
+    "tls_certificate_failure": "renew_tls_certificate", "file_permission_failure": "restore_file_permissions",
+    "schema_migration_pending": "apply_database_migration", "database_pool_exhaustion": "reset_database_pool",
+    "dns_resolution_failure": "restore_dns_configuration", "rate_limit_misconfiguration": "restore_rate_limit_configuration",
+}
+
+_ALL_REPAIR_ACTIONS = tuple(
+    action for action in (
+        "restart_app", "rollback_env_var", "fix_dependency", "clear_disk", "fix_port_config",
+        "clear_cache", "renew_tls_certificate", "restore_file_permissions",
+        "apply_database_migration", "reset_database_pool", "restore_dns_configuration",
+        "restore_rate_limit_configuration",
+    )
+)
+
 
 def _active_fault_name(observation: Mapping[str, Any]) -> str:
     """Infer the active mechanical fault without exposing its raw state."""
@@ -389,6 +410,16 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
     window = hashlib.sha256(
         f"crashdiag:v1:telemetry:{internal_fingerprint}".encode("utf-8")
     ).hexdigest()[:12]
+    correct_action = _ACTION_BY_FAULT[fault_name]
+    digest = hashlib.sha256(
+        f"crashdiag:v1:candidates:{internal_fingerprint}".encode("utf-8")
+    ).digest()
+    distractors = [action for action in _ALL_REPAIR_ACTIONS if action != correct_action]
+    offset = int.from_bytes(digest[:2], "big") % len(distractors)
+    distractors = distractors[offset:] + distractors[:offset]
+    candidate_repairs = [correct_action, *distractors[:3]]
+    rotate = int.from_bytes(digest[2:4], "big") % len(candidate_repairs)
+    candidate_repairs = candidate_repairs[rotate:] + candidate_repairs[:rotate]
     return {
         "incident_window": {"gateway": "degraded", "http_family": "5xx", "window": window},
         "telemetry": {
@@ -396,27 +427,7 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
             "signals": ["sensor-04:amber", "sensor-11:amber", "sensor-19:nominal"],
             "sample_clock": ticks,
         },
-        # Preserve a small amount of semantically meaningful evidence so a
-        # capable base model has a measurable floor. Raw values and known-good
-        # configuration remain withheld; decoy history still prevents keyword
-        # matching from being sufficient.
-        "evidence": {
-            "process_running": bool(observation.get("process", {}).get("running", True)),
-            "last_exit_reason": observation.get("process", {}).get("last_exit_reason"),
-            "dependency_anomaly": _active_fault_name(observation) == "dependency_mismatch",
-            "environment_anomaly": _active_fault_name(observation) in {
-                "bad_env_var", "broken_db_connection", "missing_secret",
-                "feature_flag_misconfiguration", "redis_connection_failure",
-                "message_queue_connection_failure", "object_storage_credentials_failure",
-            },
-            "storage_pressure": _active_fault_name(observation) == "disk_full",
-            "routing_anomaly": _active_fault_name(observation) == "port_proxy_misconfig",
-            "service_anomaly": _active_fault_name(observation) in {
-                "cache_corruption", "tls_certificate_failure", "file_permission_failure",
-                "schema_migration_pending", "database_pool_exhaustion",
-                "dns_resolution_failure", "rate_limit_misconfiguration",
-            },
-        },
+        "candidate_repairs": candidate_repairs,
     }
 
 
