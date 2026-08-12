@@ -42,13 +42,31 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
             self.assertIn("load_dotenv", source)
             self.assertIn("CRASHDIAG_ENV_FILE", source)
-            self.assertNotIn("UserSecretsClient", source)
-            self.assertNotIn("kaggle_secrets", source)
+            if name == "eval_sft.ipynb":
+                self.assertIn("UserSecretsClient", source)
+                self.assertIn("kaggle_secrets", source)
+            else:
+                self.assertNotIn("UserSecretsClient", source)
+                self.assertNotIn("kaggle_secrets", source)
             self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
             self.assertIn('PYTORCH_ALLOC_CONF', source)
             self.assertIn('expandable_segments:True', source)
             self.assertNotIn("ArtifactConfig.from_env", source)
             self.assertNotIn('"--artifact-run-id"', source)
+
+    def test_sft_eval_loads_required_kaggle_secrets(self) -> None:
+        source = _source(MODEL_DIR / "eval_sft.ipynb")
+        for key in (
+            "HF_TOKEN",
+            "CRASHDIAG_DATASET_RUN_ID",
+            "CRASHDIAG_SFT_RUN_ID",
+            "CRASHDIAG_SANDBOX_URL",
+            "CRASHDIAG_API_TOKEN",
+            "CRASHDIAG_SOURCE_COMMIT",
+        ):
+            self.assertIn(key, source)
+        self.assertIn("CRASHDIAG_SANDBOX_TOKEN", source)
+        self.assertIn("if ENV_FILE.is_file()", source)
         self.assertIn('"--load-in-4bit"', _source(MODEL_DIR / "eval_base.ipynb"))
         self.assertIn('"--epochs", "2"', _source(MODEL_DIR / "sft.ipynb"))
         self.assertIn('"--max-length", "2048"', _source(MODEL_DIR / "sft.ipynb"))
