@@ -12,4 +12,5 @@ outputs/
 wandb/
 .venv/
 .env
+env.txt
 /roadmap.md

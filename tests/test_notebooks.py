@@ -76,6 +76,7 @@ class ModelNotebookTests(unittest.TestCase):
         self.assertIn("kaggle_secret_errors", source)
         self.assertIn("loaded Kaggle secret names", source)
         self.assertIn("if ENV_FILE.is_file()", source)
+        self.assertIn('LAUNCH_DIR / "env.txt"', source)
 
     def test_grpo_eval_downloads_final_adapter_and_uploads_live_reports(self) -> None:
         source = _source(MODEL_DIR / "eval_grpo.ipynb")
