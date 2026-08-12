@@ -283,11 +283,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"GRPO_RUN_ID={args.run_id}")
     print(f"SOURCE_COMMIT={source_commit}")
     print(f"PARENT_SFT_RUN_ID={args.parent_sft_run_id}")
+    parent: dict[str, Any] | None = None
     try:
         uploader = uploader_from_args(args)
         if uploader is not None:
             if _FULL_GIT_SHA.fullmatch(source_commit) is None:
                 raise ArtifactError("hard dataset upload requires a full Git source commit")
+            if not args.parent_sft_run_id:
+                raise ArtifactError(
+                    "hard dataset upload requires --parent-sft-run-id so the parent "
+                    "adapter remains traceable in the signed run manifest"
+                )
             uploader.start_run(
                 {
                     "entrypoint": "training.generate_grpo_hard",
@@ -308,10 +314,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.parent_sft_stage_dir is not None:
             parent = read_parent_reference(args.parent_sft_stage_dir, args.parent_sft_run_id)
         else:
-            raise ArtifactError(
-                "local-only generation requires --parent-sft-stage-dir so the parent "
-                "adapter remains mechanically traceable"
-            )
+            # Local-only pre-SFT generation: no signed parent handoff exists yet.
+            # The parent reference is embedded later, once the SFT stage exists.
+            parent = None
         summary = generate_hard_datasets(
             args.train_output,
             args.eval_output,
@@ -320,7 +325,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             eval_samples_per_fault=args.eval_samples_per_fault,
             seed=args.seed,
         )
-        parent_document = {**parent, "referenced_by_source_commit": source_commit}
+        parent_document = (
+            {**parent, "referenced_by_source_commit": source_commit}
+            if parent is not None
+            else {
+                "parent_sft_run_id": None,
+                "stage": "sft",
+                "adapter_sha256": None,
+                "adapter_bytes": None,
+                "base_model": None,
+                "referenced_by_source_commit": source_commit,
+            }
+        )
         _write_json(args.parent_output, parent_document)
         if uploader is not None:
             uploader.upload_files(
