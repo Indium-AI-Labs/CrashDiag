@@ -26,7 +26,7 @@ from .artifacts import (
 )
 from .common import PRECISION_CHOICES, resolve_precision
 from .reporting import ReportBundle, generate_trainer_report
-from .qlora import prepare_4bit_qlora_model
+from .qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
 
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -183,6 +183,7 @@ def train(args: argparse.Namespace) -> Any:
             "loss_type": "nll",
             "packing": args.packing,
             "gradient_checkpointing": args.gradient_checkpointing,
+            "ddp_find_unused_parameters": False,
             "bf16": bf16,
             "fp16": fp16,
             "report_to": args.report_to,
@@ -231,6 +232,10 @@ def train(args: argparse.Namespace) -> Any:
         peft_config=lora,
         callbacks=[callback] if callback is not None else None,
     )
+    if args.load_in_4bit:
+        converted = cast_trainable_parameters_to_fp32(trainer.model)
+        if trainer.is_world_process_zero():
+            print(f"QLoRA trainable parameters cast to FP32: {converted}", flush=True)
     result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(str(args.output_dir))
     eval_metrics = trainer.evaluate() if eval_enabled else None

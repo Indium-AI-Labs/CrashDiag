@@ -37,7 +37,7 @@ from .hard_scenarios import (
     prepare_hard_scenario,
 )
 from .reporting import ReportBundle, generate_trainer_report
-from .qlora import prepare_4bit_qlora_model
+from .qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
 
 _SANDBOX_URL = os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip()
 _SANDBOX_TOKEN = os.environ.get("CRASHDIAG_API_TOKEN") or os.environ.get(
@@ -673,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         fp16=fp16,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
+        ddp_find_unused_parameters=False,
         logging_steps=args.logging_steps,
         logging_first_step=True,
         log_completions=True,
@@ -704,6 +705,10 @@ def main(argv: list[str] | None = None) -> int:
         peft_config=peft_config,
         callbacks=[callback] if callback is not None else None,
     )
+    if args.load_in_4bit:
+        converted = cast_trainable_parameters_to_fp32(trainer.model)
+        if trainer.is_world_process_zero():
+            print(f"QLoRA trainable parameters cast to FP32: {converted}", flush=True)
     result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(args.output_dir)
     eval_metrics = trainer.evaluate() if eval_enabled else None

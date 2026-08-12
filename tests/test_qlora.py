@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import unittest
 
-from training.qlora import prepare_4bit_qlora_model
+from training.qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
 
 
 class _Parameter:
-    def __init__(self) -> None:
-        self.requires_grad = True
+    def __init__(self, data, *, requires_grad: bool = True) -> None:
+        self.data = data
+        self.requires_grad = requires_grad
+
+
+class _Data:
+    def __init__(self, dtype: str) -> None:
+        self.dtype = dtype
+
+    def float(self):
+        return _Data("float32")
 
 
 class _Config:
@@ -17,7 +26,7 @@ class _Config:
 class _Model:
     def __init__(self) -> None:
         self.config = _Config()
-        self.parameters_ = [_Parameter(), _Parameter()]
+        self.parameters_ = [_Parameter(_Data("float16")), _Parameter(_Data("float16"))]
         self.input_grads_enabled = False
         self.checkpointing_kwargs = None
 
@@ -45,6 +54,22 @@ class QLoRAPreparationTests(unittest.TestCase):
             model.checkpointing_kwargs,
             {"gradient_checkpointing_kwargs": {"use_reentrant": False}},
         )
+
+    def test_only_trainable_low_precision_parameters_are_cast_to_fp32(self) -> None:
+        trainable_bf16 = _Parameter(_Data("bfloat16"))
+        trainable_fp16 = _Parameter(_Data("float16"))
+        frozen_bf16 = _Parameter(_Data("bfloat16"), requires_grad=False)
+        trainable_fp32 = _Parameter(_Data("float32"))
+        model = _Model()
+        model.parameters_ = [trainable_bf16, trainable_fp16, frozen_bf16, trainable_fp32]
+
+        count = cast_trainable_parameters_to_fp32(model)
+
+        self.assertEqual(count, 2)
+        self.assertEqual(trainable_bf16.data.dtype, "float32")
+        self.assertEqual(trainable_fp16.data.dtype, "float32")
+        self.assertEqual(frozen_bf16.data.dtype, "bfloat16")
+        self.assertEqual(trainable_fp32.data.dtype, "float32")
 
 
 if __name__ == "__main__":

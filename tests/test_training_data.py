@@ -373,6 +373,8 @@ class SftCliTests(unittest.TestCase):
         source_path = Path(__file__).resolve().parents[1] / "training" / "sft.py"
         source = source_path.read_text(encoding="utf-8")
         self.assertIn('"loss_type": "nll"', source)
+        self.assertIn('"ddp_find_unused_parameters": False', source)
+        self.assertIn("cast_trainable_parameters_to_fp32(trainer.model)", source)
         self.assertIn("_compatible_config_kwargs(", source)
 
 
