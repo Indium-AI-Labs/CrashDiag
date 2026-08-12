@@ -58,6 +58,80 @@ _APP_PORTS = (3000, 8000, 8080, 8443, 9000)
 _DISK_THRESHOLDS = (75.0, 80.0, 85.0, 90.0, 95.0)
 _BAD_DEPENDENCY_VERSIONS = ("0.9.0", "1.3.9", "2.0.0-incompatible", "9.9.9")
 _BAD_APP_ENV_VALUES = ("invalid", "prodution", "development", "PRODUCTION")
+_OPAQUE_SIGNATURES = {
+    "oom_kill": "sig-7f3a",
+    "bad_env_var": "sig-c91e",
+    "broken_db_connection": "sig-2bd8",
+    "dependency_mismatch": "sig-a64c",
+    "disk_full": "sig-54d1",
+    "port_proxy_misconfig": "sig-e83b",
+    "missing_secret": "sig-19af",
+    "feature_flag_misconfiguration": "sig-b276",
+    "redis_connection_failure": "sig-6ce4",
+    "message_queue_connection_failure": "sig-d508",
+    "object_storage_credentials_failure": "sig-38b9",
+    "cache_corruption": "sig-f142",
+    "tls_certificate_failure": "sig-9a65",
+    "file_permission_failure": "sig-47de",
+    "schema_migration_pending": "sig-0cb3",
+    "database_pool_exhaustion": "sig-8e91",
+    "dns_resolution_failure": "sig-31d7",
+    "rate_limit_misconfiguration": "sig-65a0",
+}
+
+
+def _active_fault_name(observation: Mapping[str, Any]) -> str:
+    """Infer the active mechanical fault without exposing its raw state."""
+
+    process = observation.get("process", {})
+    if isinstance(process, Mapping) and process.get("running") is False:
+        return "oom_kill"
+    environment = observation.get("environment", {})
+    if isinstance(environment, Mapping):
+        variables = environment.get("variables", {})
+        expected = environment.get("expected", {})
+        if isinstance(variables, Mapping) and isinstance(expected, Mapping):
+            mismatches = {
+                key for key, value in expected.items() if variables.get(key) != value
+            }
+            env_faults = {
+                "APP_ENV": "bad_env_var",
+                "DATABASE_URL": "broken_db_connection",
+                "API_SIGNING_SECRET": "missing_secret",
+                "FEATURE_ASYNC_JOBS": "feature_flag_misconfiguration",
+                "REDIS_URL": "redis_connection_failure",
+                "QUEUE_URL": "message_queue_connection_failure",
+                "OBJECT_STORAGE_TOKEN": "object_storage_credentials_failure",
+            }
+            for key, fault_name in env_faults.items():
+                if key in mismatches:
+                    return fault_name
+    dependencies = observation.get("dependencies", {})
+    if isinstance(dependencies, Mapping):
+        installed = dependencies.get("installed", {})
+        required = dependencies.get("required", {})
+        if isinstance(installed, Mapping) and isinstance(required, Mapping):
+            if any(installed.get(key) != value for key, value in required.items()):
+                return "dependency_mismatch"
+    disk = observation.get("disk", {})
+    if isinstance(disk, Mapping):
+        if float(disk.get("used_percent", 0.0)) >= float(disk.get("healthy_below_percent", 101.0)):
+            return "disk_full"
+    network = observation.get("network", {})
+    if isinstance(network, Mapping) and network.get("proxy_target_port") != network.get("app_port"):
+        return "port_proxy_misconfig"
+    services = observation.get("services", {})
+    if isinstance(services, Mapping):
+        service_faults = {
+            "cache": "cache_corruption", "tls": "tls_certificate_failure",
+            "permissions": "file_permission_failure", "migration": "schema_migration_pending",
+            "db_pool": "database_pool_exhaustion", "dns": "dns_resolution_failure",
+            "rate_limit": "rate_limit_misconfiguration",
+        }
+        for service, fault_name in service_faults.items():
+            if services.get(service) is False:
+                return fault_name
+    raise ValueError("unable to derive an active fault signature from observation")
 
 
 def hard_sample_seed(base_seed: int, fault_name: str, variation_index: int) -> int:
@@ -295,57 +369,33 @@ def prepare_hard_scenario(
 
 
 def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
-    """Return raw operational evidence without derived answers or ground truth."""
+    """Return evidence-only opaque telemetry for the default v1 curriculum.
 
-    process = observation.get("process", {})
-    environment = observation.get("environment", {})
-    dependencies = observation.get("dependencies", {})
-    disk = observation.get("disk", {})
-    network = observation.get("network", {})
-    services = observation.get("services", {})
-    recent_logs = (
-        [str(item) for item in observation.get("recent_logs", [])]
-        if isinstance(observation.get("recent_logs", []), list)
-        else []
+    The active signature is intentionally non-semantic: successful adaptation
+    requires learning its relation to a repair from training data, while the
+    evaluator reconstructs the actual state from the row identity.
+    """
+
+    fault_name = _active_fault_name(observation)
+    signature = _OPAQUE_SIGNATURES[fault_name]
+    ticks = int(observation.get("clock_ticks", 0))
+    internal_fingerprint = json.dumps(
+        observation,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
     )
-    if isinstance(network, Mapping):
-        app_port = network.get("app_port")
-        if isinstance(app_port, int) and not isinstance(app_port, bool):
-            recent_logs = [
-                item.replace(f"port {app_port}", "port <redacted>")
-                for item in recent_logs
-            ]
+    window = hashlib.sha256(
+        f"crashdiag:v1:telemetry:{internal_fingerprint}".encode("utf-8")
+    ).hexdigest()[:12]
     return {
-        "http": {
-            "status": observation.get("health_state"),
-            "status_code": observation.get("http_status"),
+        "incident_window": {"gateway": "degraded", "http_family": "5xx", "window": window},
+        "telemetry": {
+            "signature": signature,
+            "signals": ["sensor-04:amber", "sensor-11:amber", "sensor-19:nominal"],
+            "sample_clock": ticks,
         },
-        "process": dict(process) if isinstance(process, Mapping) else {},
-        "environment": {
-            "variables": dict(environment.get("variables", {}))
-            if isinstance(environment, Mapping)
-            and isinstance(environment.get("variables", {}), Mapping)
-            else {}
-        },
-        "dependencies": {
-            "installed": dict(dependencies.get("installed", {}))
-            if isinstance(dependencies, Mapping)
-            and isinstance(dependencies.get("installed", {}), Mapping)
-            else {}
-        },
-        "disk": {
-            "used_percent": disk.get("used_percent")
-            if isinstance(disk, Mapping)
-            else None
-        },
-        "network": {
-            "proxy_target_port": network.get("proxy_target_port")
-            if isinstance(network, Mapping)
-            else None
-        },
-        "services": dict(services) if isinstance(services, Mapping) else {},
-        "clock_ticks": observation.get("clock_ticks"),
-        "recent_logs": recent_logs,
     }
 
 
