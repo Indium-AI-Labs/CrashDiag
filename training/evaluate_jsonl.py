@@ -12,9 +12,52 @@ from typing import Any
 
 from .artifacts import ArtifactError, add_artifact_arguments, preload_env, uploader_from_args
 from .calibrate_grpo import read_jsonl
+from .common import SYSTEM_PROMPT
 from .grpo import configure_reward_backend, mechanical_reward
 from .inference import generate_from_messages, load_local_policy
 from .reporting import generate_evaluation_report
+
+
+# A generic worked example that demonstrates the exact output contract without
+# leaking any specific scenario's answer. The observation uses a fictional
+# signature and a "wait and observe" resolution, so it never rewards guessing
+# a particular fault. This is prepended for generation only; mechanical_reward
+# still verifies against the original scenario prompt.
+FEW_SHOT_EXAMPLE = {
+    "observation": {
+        "incident_window": {"gateway": "degraded", "http_family": "5xx", "window": "example-000000000000"},
+        "telemetry": {
+            "signature": "sig-example",
+            "signals": ["sensor-00:amber", "sensor-01:nominal", "sensor-02:nominal"],
+            "sample_clock": 0,
+        },
+        "candidate_repairs": [
+            "wait_and_observe",
+            "restart_app",
+            "clear_cache",
+            "fix_dependency",
+        ],
+    }
+}
+
+FEW_SHOT_MESSAGES: list[dict[str, str]] = [
+    {"role": "system", "content": SYSTEM_PROMPT},
+    {"role": "user", "content": json.dumps(FEW_SHOT_EXAMPLE, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)},
+    {"role": "assistant", "content": '{"action":"wait_and_observe","parameters":{}}'},
+]
+
+
+def few_shot_prompt(prompt: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
+    """Prepend the format-demonstration example to a scenario prompt.
+
+    The few-shot messages use the same system prompt and a synthetic
+    observation whose correct answer (wait_and_observe) is never the answer to
+    any real scenario, so it cannot inflate a model's score by copying.
+    """
+    return [
+        {"role": message.get("role", ""), "content": message.get("content", "")}
+        for message in [*FEW_SHOT_MESSAGES, *prompt]
+    ]
 
 
 def summarize_results(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -61,6 +104,7 @@ def evaluate_rows(
     *,
     max_rows: int | None = None,
     progress: Callable[[str], None] | None = None,
+    few_shot: bool = True,
 ) -> dict[str, Any]:
     selected = list(rows if max_rows is None else rows[:max_rows])
     emit = progress or (lambda message: print(message, flush=True))
@@ -70,12 +114,16 @@ def evaluate_rows(
         prompt = row.get("prompt")
         if not isinstance(prompt, list):
             raise ValueError(f"row {index} has no conversational prompt")
-        completion = str(generate_one(prompt))
+        generation_prompt = few_shot_prompt(prompt) if few_shot else prompt
+        completion = str(generate_one(generation_prompt))
         extras: dict[str, list[Any]] = {}
 
         def log_extra(name: str, values: list[Any]) -> None:
             extras[name] = list(values)
 
+        # Replay verification uses the ORIGINAL scenario prompt (without the
+        # few-shot demo) so the mechanical reward still checks the exact
+        # reconstruction of the row the model was asked to solve.
         rewards = mechanical_reward(
             [completion],
             fault_name=[row.get("fault_name")],
@@ -118,6 +166,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/jsonl-evaluation"))
     parser.add_argument("--max-rows", type=int, default=0, help="0 evaluates the complete file")
+    parser.add_argument(
+        "--few-shot",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="prepend a format-demonstration example to each prompt for generation",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=96)
     parser.add_argument("--precision", choices=("auto", "bf16", "fp16", "fp32"), default="auto")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -177,6 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows,
             generate_one,
             max_rows=args.max_rows or None,
+            few_shot=args.few_shot,
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = args.output_dir / "mechanical_evaluation.json"
