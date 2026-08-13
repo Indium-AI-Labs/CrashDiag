@@ -464,6 +464,66 @@ print("\\n=== ALL BASELINE RESULTS ===")
 for slug, summary in results.items():
     print(f"{{slug}}: success={{summary['success_rate']:.1%}} strict_json={{summary['strict_json_rate']:.1%}} backend_error={{summary['backend_error_rate']:.1%}}")
 ''',
+        f'''# Model-wise comparison across all baselines
+from pathlib import Path as _P
+import json as _j, html as _h
+
+slugs = list(MODELS)
+_chart_rows = []
+for _slug in slugs:
+    _p2 = _P(f"outputs/{{_slug}}-base-eval/mechanical_evaluation.json")
+    if not _p2.exists():
+        print(f"missing: {{_p2}}"); continue
+    _data = _j.loads(_p2.read_text())
+    _s = _data["summary"]
+    _chart_rows.append((_slug, _s["success_rate"], _s["strict_json_rate"], _s["backend_error_rate"], dict(_data.get("per_fault", {{}}))))
+
+for _slug, _, _, _, _per_fault in _chart_rows:
+    print(f"\\n[{{_slug}}] per-fault:")
+    for _fault in sorted(_per_fault):
+        _v = _per_fault[_fault]
+        print(f"  {{_fault}}: {{_v['resolved']}}/{{_v['episodes']}}  {{_v['success_rate']:.1%}}")
+
+_width,_height,_left,_right,_top,_bottom = 960,480,78,24,70,120
+_plot_w = _width - _left - _right
+_plot_h = _height - _top - _bottom
+_n = len(_chart_rows) or 1
+_slot = _plot_w / _n
+_bar = _slot * 0.34
+_colors = {{"success": "#2563eb", "strict_json": "#16a34a"}}
+_parts = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    f'<svg xmlns="http://www.w3.org/2000/svg" width="{{_width}}" height="{{_height}}" viewBox="0 0 {{_width}} {{_height}}" role="img">',
+    '<rect width="100%" height="100%" fill="#ffffff"/>',
+    f'<text x="{{_width/2:.1f}}" y="34" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="600">Baseline comparison by model (hard-v3)</text>',
+]
+for _t in range(6):
+    _r = _t/5; _y = _top + (1-_r)*_plot_h
+    _parts += [f'<line x1="{{_left}}" y1="{{_y:.1f}}" x2="{{_width-_right}}" y2="{{_y:.1f}}" stroke="#e5e7eb" stroke-width="1"/>',
+               f'<text x="{{_left-10}}" y="{{_y+4:.1f}}" text-anchor="end" font-family="sans-serif" font-size="12" fill="#4b5563">{{_r:.0%}}</text>']
+for _i,(_slug,_s,_strict,_err,_) in enumerate(_chart_rows):
+    _x0 = _left + _i*_slot + (_slot - 2*_bar - 6)/2
+    for _j,(_val,_c) in enumerate([(_s,_colors["success"]),(_strict,_colors["strict_json"])]):
+        _bh = _val*_plot_h; _y = _top + _plot_h - _bh
+        _parts += [f'<rect x="{{_x0+_j*(_bar+6):.1f}}" y="{{_y:.1f}}" width="{{_bar:.1f}}" height="{{_bh:.1f}}" fill="{{_c}}" rx="3"/>',
+                   f'<text x="{{_x0+_j*(_bar+6)+_bar/2:.1f}}" y="{{max(_top+14,_y-8):.1f}}" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600">{{_val:.0%}}</text>']
+    _cx = _left + _i*_slot + _slot/2
+    _parts += [f'<text x="{{_cx:.1f}}" y="{{_height-_bottom+22}}" text-anchor="end" transform="rotate(-30 {{_cx:.1f}} {{_height-_bottom+22}})" font-family="sans-serif" font-size="12">{{_h.escape(_slug)}}</text>']
+_parts += [f'<line x1="{{_left}}" y1="{{_top}}" x2="{{_left}}" y2="{{_height-_bottom}}" stroke="#111827" stroke-width="1.2"/>',
+           f'<line x1="{{_left}}" y1="{{_height-_bottom}}" x2="{{_width-_right}}" y2="{{_height-_bottom}}" stroke="#111827" stroke-width="1.2"/>',
+           f'<rect x="{{_left}}" y="{{55}}" width="18" height="9" fill="{{_colors["success"]}}"/><text x="{{_left+24}}" y="{{63}}" font-family="sans-serif" font-size="12">success_rate</text>',
+           f'<rect x="{{_left+120}}" y="{{55}}" width="18" height="9" fill="{{_colors["strict_json"]}}"/><text x="{{_left+144}}" y="{{63}}" font-family="sans-serif" font-size="12">strict_json_rate</text>',
+           "</svg>"]
+_svg = _P("outputs/baselines_summary.svg")
+_svg.parent.mkdir(parents=True, exist_ok=True)
+_svg.write_text("\\n".join(_parts), encoding="utf-8")
+
+from IPython.display import SVG, display
+display(SVG(filename=str(_svg)))
+
+for _slug, _s, _strict, _err, _ in _chart_rows:
+    print(f"{{_slug:14s}}  success {{_s:.1%}}  strict_json {{_strict:.1%}}  backend_error {{_err:.1%}}")
+''',
     ]
     return _nb("Qwen2.5 all-baselines evaluation", cells)
 
