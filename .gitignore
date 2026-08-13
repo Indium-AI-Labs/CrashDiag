@@ -15,5 +15,6 @@ wandb/
 env.txt
 data/roadmap.md
 /roadmap.md
+/analysis.md
 .commandcode/taste/taste.md
 .commandcode/taste/taste/taste.md

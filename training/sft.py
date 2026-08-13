@@ -157,7 +157,7 @@ def train(args: argparse.Namespace) -> Any:
 
     eval_enabled = eval_dataset is not None and len(eval_dataset) > 0
     uploader = getattr(args, "artifact_uploader", None)
-    callback = make_checkpoint_upload_callback(uploader, "sft")
+    callback = make_checkpoint_upload_callback(uploader, args.artifact_stage)
     config_kwargs = _compatible_config_kwargs(
         SFTConfig,
         {
@@ -260,7 +260,7 @@ def train(args: argparse.Namespace) -> Any:
     if trainer.is_world_process_zero() and uploader is not None:
         uploader.upload_directory(
             args.output_dir,
-            "sft",
+            args.artifact_stage,
             metadata={
                 "model": args.model,
                 "train_metrics": result.metrics,
@@ -328,6 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--report-to", default="none")
     parser.add_argument("--resume-from-checkpoint", default=None)
+    parser.add_argument(
+        "--artifact-stage",
+        default="sft",
+        help="bucket stage name; a per-model slug keeps models in one run",
+    )
     add_artifact_arguments(parser)
     return parser
 
@@ -355,7 +360,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.artifact_uploader = uploader
         if uploader is not None and process_is_world_zero():
             uploader.start_stage(
-                "sft",
+                args.artifact_stage,
                 {
                     "model": args.model,
                     "dataset": str(args.dataset),

@@ -159,8 +159,7 @@ def _download_cell(model_slug: str, base_model: str, kind: str) -> str:
     return f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
 
-CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v3").strip().lower()
-EVAL_FILE = "grpo_hard_eval.jsonl" if CURRICULUM == "hard-v3" else "grpo_eval.jsonl"
+{_hard_curriculum_cell()}
 DATASET_DIR = Path("artifacts/datasets")
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
 assert (DATASET_DIR / EVAL_FILE).is_file(), f"dataset stage missing {{EVAL_FILE}}; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
@@ -287,8 +286,7 @@ if not SFT_RUN_ID:
             f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
 
-CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v3").strip().lower()
-EVAL_FILE = "grpo_hard_eval.jsonl" if CURRICULUM == "hard-v3" else "grpo_eval.jsonl"
+{_hard_curriculum_cell()}
 DATASET_DIR, SFT_DIR = Path("artifacts/datasets"), Path("artifacts/sft")
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=SFT_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("sft", SFT_DIR)
@@ -314,9 +312,7 @@ from training.artifacts import ArtifactConfig, ArtifactUploader
 SFT_RUN_ID = os.environ.get("CRASHDIAG_SFT_RUN_ID", "").strip()
 if not SFT_RUN_ID: raise RuntimeError("Set CRASHDIAG_SFT_RUN_ID to the completed SFT run ID.")
 GRPO_RUN_ID = os.environ.get("CRASHDIAG_GRPO_RUN_ID") or ist_run_id("grpo")
-CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v3").strip().lower()
-TRAIN_FILE = "grpo_hard_train.jsonl" if CURRICULUM == "hard-v3" else "grpo_train.jsonl"
-EVAL_FILE = "grpo_hard_eval.jsonl" if CURRICULUM == "hard-v3" else "grpo_eval.jsonl"
+{_hard_curriculum_cell()}
 DATASET_DIR, SFT_DIR = Path("artifacts/datasets"), Path("artifacts/sft")
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=SFT_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("sft", SFT_DIR)
@@ -383,8 +379,7 @@ print(f"grpo_eval_run_id={{GRPO_EVAL_RUN_ID}}")
             f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
 
-CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v3").strip().lower()
-EVAL_FILE = "grpo_hard_eval.jsonl" if CURRICULUM == "hard-v3" else "grpo_eval.jsonl"
+{_hard_curriculum_cell()}
 DATASET_DIR = Path("artifacts/datasets")
 GRPO_DIR = Path("artifacts/grpo")
 token = os.environ["HF_TOKEN"]
@@ -396,6 +391,187 @@ print(f"eval_file={{EVAL_FILE}}")
 ''',
             _grpo_eval_cell(model_slug, base_model),
             _svg_cell("grpo-eval", "GRPO_EVAL_RUN_ID"),
+        ],
+    )
+
+
+# --- all-models training notebooks ------------------------------------------
+#
+# Both notebooks share ONE run ID for every model.  Each model's training
+# uploads under its own stage folder inside that run, so a single run ID in
+# the HF bucket contains one subfolder per model.
+
+def _models_cell() -> str:
+    entries = "\n".join(
+        f'    "{slug}": "{base}",' for slug, base in MODELS.items()
+    )
+    return f'''BUCKET_ID = "{BUCKET_ID}"
+MODELS = {{
+{entries}
+}}
+DATASET_RUN_ID = os.environ.get("CRASHDIAG_DATASET_RUN_ID", "").strip()
+ALL_RUN_ID = os.environ.get("CRASHDIAG_ALL_RUN_ID", "").strip() or ist_run_id("all")
+if not DATASET_RUN_ID:
+    raise RuntimeError("Set CRASHDIAG_DATASET_RUN_ID to the fresh dataset-generation run ID.")
+print(f"models={{list(MODELS)}}")
+print(f"dataset_run_id={{DATASET_RUN_ID}}")
+print(f"ALL_RUN_ID={{ALL_RUN_ID}}")'''
+
+
+def _models_setup_cell() -> str:
+    return f'''from datetime import datetime
+from zoneinfo import ZoneInfo
+import os
+
+def ist_run_id(stage):
+    return datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%dT%H%M%SIST") + f"-{{stage}}"
+{_models_cell()}'''
+
+
+def _datasets_cell() -> str:
+    return f'''from pathlib import Path
+from training.artifacts import ArtifactConfig, ArtifactUploader
+
+DATASET_DIR = Path("artifacts/datasets")
+ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
+assert (DATASET_DIR / "sft_train.jsonl").is_file(), f"dataset stage missing sft_train.jsonl; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
+print(f"sft_train={{DATASET_DIR / 'sft_train.jsonl'}}")'''
+
+
+def _hard_curriculum_cell() -> str:
+    return f'''CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v4").strip().lower()
+HARD = CURRICULUM in ("hard-v3", "hard-v4")
+TRAIN_FILE = "grpo_hard_train.jsonl" if HARD else "grpo_train.jsonl"
+EVAL_FILE = "grpo_hard_eval.jsonl" if HARD else "grpo_eval.jsonl"'''
+
+
+def build_sft_all() -> dict:
+    return _nb(
+        "Qwen2.5 SFT all models (one run ID)",
+        [
+            _setup_cell("env.txt", kaggle=False),
+            _models_setup_cell(),
+            _datasets_cell(),
+            f'''import subprocess, sys
+
+results = {{}}
+for slug, base_model in MODELS.items():
+    output_dir = f"outputs/{{slug}}-sft"
+    print(f"=== SFT {{base_model}} ({{slug}}) ===")
+    command = [
+        sys.executable, "-m", "accelerate.commands.launch",
+        "--num_processes", "1", "--num_machines", "1",
+        "--mixed_precision", "bf16", "--dynamo_backend", "no",
+        "-m", "training.sft",
+        "--model", base_model,
+        "--dataset", str(DATASET_DIR / "sft_train.jsonl"),
+        "--eval-dataset", str(DATASET_DIR / "sft_eval.jsonl"),
+        "--output-dir", output_dir,
+        "--epochs", "1",
+        "--batch-size", "1",
+        "--eval-batch-size", "1",
+        "--gradient-accumulation-steps", "8",
+        "--max-length", "2048",
+        "--learning-rate", "2e-4",
+        "--lora-rank", "16", "--lora-alpha", "32",
+        "--load-in-4bit",
+        "--precision", "bf16",
+        "--report-to", "none",
+        "--artifact-bucket", BUCKET_ID,
+        "--run-id", ALL_RUN_ID,
+        "--artifact-stage", slug,
+    ]
+    subprocess.run(command, check=True)
+    import json
+    report = json.loads((Path(output_dir) / "reports" / "metrics_summary.json").read_text(encoding="utf-8"))
+    results[slug] = report
+
+print("\\n=== ALL SFT RESULTS ===")
+for slug, report in results.items():
+    print(f"{{slug}}: {{report}}")''',
+            f'''from IPython.display import SVG, display
+
+for slug in MODELS:
+    REPORTS_DIR = Path(f"outputs/{{slug}}-sft") / "reports"
+    charts = sorted(REPORTS_DIR.glob("*.svg"))
+    print(f"[{{slug}}] hf://buckets/{{BUCKET_ID}}/runs/{{ALL_RUN_ID}}/{{slug}}/reports")
+    for chart in charts:
+        display(SVG(filename=str(chart)))''',
+        ],
+    )
+
+
+def build_grpo_all() -> dict:
+    return _nb(
+        "Qwen2.5 GRPO all models (one run ID)",
+        [
+            _setup_cell(".env", kaggle=False),
+            _models_setup_cell(),
+            f'''from pathlib import Path
+from training.artifacts import ArtifactConfig, ArtifactUploader
+
+SFT_RUN_ID = os.environ.get("CRASHDIAG_SFT_RUN_ID", "").strip()
+if not SFT_RUN_ID: raise RuntimeError("Set CRASHDIAG_SFT_RUN_ID to the single SFT-all run ID.")
+{_hard_curriculum_cell()}
+DATASET_DIR, SFT_ROOT = Path("artifacts/datasets"), Path("artifacts/sft-all")
+token = os.environ["HF_TOKEN"]
+ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=token)).download_stage("datasets", DATASET_DIR)
+for slug in MODELS:
+    stage_dir = SFT_ROOT / slug
+    if stage_dir.exists():
+        import shutil
+        shutil.rmtree(stage_dir)
+    ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=SFT_RUN_ID, token=token)).download_stage(slug, stage_dir)
+assert (DATASET_DIR / TRAIN_FILE).is_file(), f"dataset stage missing {{TRAIN_FILE}}; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
+assert (DATASET_DIR / EVAL_FILE).is_file(), f"dataset stage missing {{EVAL_FILE}}; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
+print(f"SFT_RUN_ID={{SFT_RUN_ID}}")
+print(f"ALL_RUN_ID={{ALL_RUN_ID}}")
+print(f"curriculum={{CURRICULUM}}")
+print(f"train_file={{TRAIN_FILE}}")
+print(f"eval_file={{EVAL_FILE}}")''',
+            f'''import subprocess, sys
+
+for slug in MODELS:
+    print(f"=== GRPO {{slug}} ===")
+    common = [
+        sys.executable, "-m", "accelerate.commands.launch",
+        "--num_processes", "1", "--num_machines", "1",
+        "--mixed_precision", "bf16", "--dynamo_backend", "no",
+        "-m", "training.grpo", "--model", str(SFT_ROOT / slug),
+        "--train-file", str(DATASET_DIR / TRAIN_FILE),
+        "--eval-file", str(DATASET_DIR / EVAL_FILE),
+        "--output-dir", f"outputs/{{slug}}-grpo", "--load-in-4bit", "--precision", "bf16",
+        "--batch-size", "2", "--gradient-accumulation-steps", "4", "--num-generations", "2",
+        "--max-prompt-length", "1024", "--max-completion-length", "64",
+        "--max-steps", "24", "--artifact-bucket", BUCKET_ID, "--run-id", ALL_RUN_ID,
+        "--artifact-stage", f"{{slug}}-grpo-smoke", "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+    ]
+    subprocess.run(common, check=True)
+    full = common[:]
+    full[full.index("24")] = "96"
+    full[full.index(f"{{slug}}-grpo-smoke")] = f"{{slug}}-grpo"
+    subprocess.run(full, check=True)''',
+            f'''from training.evaluate_jsonl import main as evaluate_main
+
+for slug in MODELS:
+    print(f"=== GRPO eval {{slug}} ===")
+    exit_code = evaluate_main([
+        "--model", f"outputs/{{slug}}-grpo", "--dataset", str(DATASET_DIR / EVAL_FILE),
+        "--output-dir", f"outputs/{{slug}}-grpo-eval", "--load-in-4bit", "--precision", "bf16",
+        "--max-new-tokens", "64",
+        "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+        "--artifact-bucket", BUCKET_ID, "--run-id", ALL_RUN_ID, "--artifact-stage", f"{{slug}}-grpo-eval",
+        "--no-few-shot",
+    ])
+    if exit_code: raise RuntimeError(f"GRPO evaluation failed for {{slug}}: {{exit_code}}")''',
+            f'''from IPython.display import SVG, display
+
+for slug in MODELS:
+    REPORTS_DIR = Path(f"outputs/{{slug}}-grpo-eval") / "reports"
+    charts = sorted(REPORTS_DIR.glob("*.svg"))
+    print(f"[{{slug}}] hf://buckets/{{BUCKET_ID}}/runs/{{ALL_RUN_ID}}/{{slug}}-grpo-eval/reports")
+    for chart in charts:
+        display(SVG(filename=str(chart)))''',
         ],
     )
 
@@ -427,8 +603,9 @@ print(f"dataset_run_id={{DATASET_RUN_ID}}")
         f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
 
-CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v3").strip().lower()
-EVAL_FILE = "grpo_hard_eval.jsonl" if CURRICULUM == "hard-v3" else "grpo_eval.jsonl"
+CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v4").strip().lower()
+HARD = CURRICULUM in ("hard-v3", "hard-v4")
+EVAL_FILE = "grpo_hard_eval.jsonl" if HARD else "grpo_eval.jsonl"
 DATASET_DIR = Path("artifacts/datasets")
 ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
 assert (DATASET_DIR / EVAL_FILE).is_file(), f"dataset stage missing {{EVAL_FILE}}; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
@@ -495,7 +672,7 @@ _parts = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{{_width}}" height="{{_height}}" viewBox="0 0 {{_width}} {{_height}}" role="img">',
     '<rect width="100%" height="100%" fill="#ffffff"/>',
-    f'<text x="{{_width/2:.1f}}" y="34" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="600">Baseline comparison by model (hard-v3)</text>',
+    f'<text x="{{_width/2:.1f}}" y="34" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="600">Baseline comparison by model (hard-v4)</text>',
 ]
 for _t in range(6):
     _r = _t/5; _y = _top + (1-_r)*_plot_h
@@ -554,6 +731,13 @@ def main() -> int:
     all_nb = NOTEBOOK_ROOT / "eval_all_baselines.ipynb"
     all_nb.write_text(json.dumps(build_eval_all_baselines(), indent=1) + "\n", encoding="utf-8")
     print(f"wrote {all_nb}")
+    for name, builder in (
+        ("sft_all.ipynb", build_sft_all),
+        ("grpo_all.ipynb", build_grpo_all),
+    ):
+        path = NOTEBOOK_ROOT / name
+        path.write_text(json.dumps(builder(), indent=1) + "\n", encoding="utf-8")
+        print(f"wrote {path}")
     return 0
 
 

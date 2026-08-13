@@ -24,7 +24,7 @@ NOTEBOOK_NAMES = {
     "grpo.ipynb",
     "eval_grpo.ipynb",
 }
-TOP_LEVEL = {"eval_all_baselines.ipynb"}
+TOP_LEVEL = {"eval_all_baselines.ipynb", "sft_all.ipynb", "grpo_all.ipynb"}
 
 
 def _source(path: Path) -> str:
@@ -92,7 +92,7 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn("kaggle_secret_errors", source)
             self.assertIn('LAUNCH_DIR / "env.txt"', source)
 
-    def test_grpo_trains_and_evaluates_hard_v3_by_default(self) -> None:
+    def test_grpo_trains_and_evaluates_hard_curriculum_by_default(self) -> None:
         for slug in PER_MODEL:
             grpo = _source(NOTEBOOK_ROOT / slug / "grpo.ipynb")
             self.assertIn('"--train-file", str(DATASET_DIR / TRAIN_FILE)', grpo)
@@ -126,3 +126,32 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn(f'"{slug}": "{base}"', source)
         self.assertIn('"--artifact-stage", "base-eval"', source)
         self.assertIn("ALL BASELINE RESULTS", source)
+
+    def test_all_training_notebooks_share_one_run_id_per_model(self) -> None:
+        sft = _source(NOTEBOOK_ROOT / "sft_all.ipynb")
+        grpo = _source(NOTEBOOK_ROOT / "grpo_all.ipynb")
+        for source in (sft, grpo):
+            self.assertIn("CRASHDIAG_ALL_RUN_ID", source)
+            self.assertIn('ALL_RUN_ID = os.environ.get("CRASHDIAG_ALL_RUN_ID", "").strip() or ist_run_id("all")', source)
+            for slug, base in {
+                "qwen2.5_14b": "Qwen/Qwen2.5-14B-Instruct",
+                "qwen2.5_7b": "Qwen/Qwen2.5-7B-Instruct",
+                "qwen2.5_3b": "Qwen/Qwen2.5-3B-Instruct",
+                "qwen2.5_1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
+                "qwen2.5_0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+            }.items():
+                self.assertIn(f'"{slug}": "{base}"', source)
+                self.assertIn(f'"{slug}"', source)
+        self.assertIn('"--run-id", ALL_RUN_ID', sft)
+        self.assertIn('"--artifact-stage", slug', sft)
+        self.assertIn('"--run-id", ALL_RUN_ID', grpo)
+        self.assertIn('"--artifact-stage", f"{slug}-grpo-smoke"', grpo)
+        self.assertIn('full[full.index(f"{slug}-grpo-smoke")] = f"{slug}-grpo"', grpo)
+        self.assertIn("CRASHDIAG_SFT_RUN_ID", grpo)
+        self.assertIn('if not SFT_RUN_ID: raise RuntimeError("Set CRASHDIAG_SFT_RUN_ID to the single SFT-all run ID.")', grpo)
+        self.assertIn("grpo-smoke", grpo)
+        self.assertIn('"--no-few-shot"', grpo)
+        self.assertIn('CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v4").strip().lower()', grpo)
+        self.assertIn('HARD = CURRICULUM in ("hard-v3", "hard-v4")', grpo)
+        self.assertIn('TRAIN_FILE = "grpo_hard_train.jsonl" if HARD else "grpo_train.jsonl"', grpo)
+        self.assertIn('EVAL_FILE = "grpo_hard_eval.jsonl" if HARD else "grpo_eval.jsonl"', grpo)
