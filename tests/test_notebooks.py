@@ -102,6 +102,17 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn('"96"', grpo)
             self.assertIn("grpo-smoke", grpo)
             self.assertIn('TRAIN_FILE = "grpo_hard_train.jsonl"', grpo)
+            self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_sft.ipynb"))
+            self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
+
+    def test_evaluation_has_few_shot_prompting(self) -> None:
+        from training.evaluate_jsonl import FEW_SHOT_MESSAGES, few_shot_prompt, SYSTEM_PROMPT
+
+        self.assertIn(SYSTEM_PROMPT, [msg["content"] for msg in FEW_SHOT_MESSAGES])
+        self.assertIn("wait_and_observe", json.dumps(FEW_SHOT_MESSAGES))
+        wrapped = few_shot_prompt([{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": "real"}])
+        self.assertEqual(wrapped[: len(FEW_SHOT_MESSAGES)], FEW_SHOT_MESSAGES)
+        self.assertEqual(wrapped[-1]["content"], "real")
 
     def test_eval_all_baselines_covers_all_models(self) -> None:
         source = _source(NOTEBOOK_ROOT / "eval_all_baselines.ipynb")

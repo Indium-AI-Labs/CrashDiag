@@ -178,6 +178,7 @@ exit_code = evaluate_main([
     "--max-new-tokens", "64",
     "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
     "--artifact-bucket", BUCKET_ID, "--run-id", SFT_EVAL_RUN_ID, "--artifact-stage", "sft-eval",
+    "--no-few-shot",
 ])
 if exit_code: raise RuntimeError(f"SFT evaluation failed: {{exit_code}}")
 '''
@@ -192,6 +193,7 @@ exit_code = evaluate_main([
     "--max-new-tokens", "64",
     "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
     "--artifact-bucket", BUCKET_ID, "--run-id", GRPO_EVAL_RUN_ID, "--artifact-stage", "grpo-eval",
+    "--no-few-shot",
 ])
 if exit_code: raise RuntimeError(f"GRPO evaluation failed: {{exit_code}}")
 '''
