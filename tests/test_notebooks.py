@@ -24,7 +24,13 @@ NOTEBOOK_NAMES = {
     "grpo.ipynb",
     "eval_grpo.ipynb",
 }
-TOP_LEVEL = {"eval_all_baselines.ipynb", "sft_all.ipynb", "grpo_all.ipynb"}
+TOP_LEVEL = {
+    "eval_all_baselines.ipynb",
+    "eval_all_sft.ipynb",
+    "eval_all_grpo.ipynb",
+    "sft_all.ipynb",
+    "grpo_all.ipynb",
+}
 
 
 def _source(path: Path) -> str:
@@ -82,8 +88,13 @@ class ModelNotebookTests(unittest.TestCase):
                 self.assertIn("loaded Kaggle secret names", source)
             for name in ("sft.ipynb", "grpo.ipynb"):
                 source = _source(NOTEBOOK_ROOT / slug / name)
-                self.assertNotIn("UserSecretsClient", source)
-                self.assertNotIn("kaggle_secrets", source)
+                if slug == "qwen2.5_0.5b" and name == "sft.ipynb":
+                    self.assertIn("UserSecretsClient", source)
+                    self.assertIn("kaggle_secrets", source)
+                    self.assertIn("loaded Kaggle secret names", source)
+                else:
+                    self.assertNotIn("UserSecretsClient", source)
+                    self.assertNotIn("kaggle_secrets", source)
 
     def test_eval_sft_requires_sft_run_id(self) -> None:
         for slug in PER_MODEL:
