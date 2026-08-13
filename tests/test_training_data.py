@@ -87,7 +87,7 @@ class DatasetGenerationTests(unittest.TestCase):
             self.assertNotIn('"dependencies"', prompt_text)
             self.assertNotIn('"used_percent"', prompt_text)
             self.assertIn('"signature"', prompt_text)
-            self.assertIn('"candidate_repairs"', prompt_text)
+            self.assertNotIn('"candidate_repairs"', prompt_text)
             self.assertNotIn('"environment_anomaly"', prompt_text)
             self.assertNotIn('"dependency_anomaly"', prompt_text)
             self.assertTrue(sft["metadata"]["mechanically_validated"])

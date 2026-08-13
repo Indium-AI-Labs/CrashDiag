@@ -295,6 +295,7 @@ class MockSandbox(SandboxBackend):
             },
             "services": dict(self.services),
             "clock_ticks": self.clock_ticks,
+            "action_history": [dict(entry) for entry in self.action_history],
             "recent_logs": list(self.logs[-10:]),
         }
 

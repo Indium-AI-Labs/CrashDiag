@@ -30,7 +30,7 @@ class HardDatasetTests(unittest.TestCase):
 
             self.assertEqual(summary["train"]["rows"], 432)
             self.assertEqual(summary["eval"]["rows"], 144)
-            self.assertEqual(summary["curriculum_version"], 3)
+            self.assertEqual(summary["curriculum_version"], 4)
             self.assertEqual(summary["action_contract"], "parameter_free_repairs")
             train_rows = [json.loads(line) for line in train.read_text().splitlines()]
             eval_rows = [json.loads(line) for line in evaluation.read_text().splitlines()]

@@ -1,5 +1,5 @@
 """Fresh-start a new Qwen3-14B run: clear everything, then regenerate the
-v1 (SFT + GRPO) and v3-hard (GRPO) datasets and upload them as ONE fresh
+v1 (SFT + GRPO) and hard-v4 (GRPO) datasets and upload them as ONE fresh
 `datasets` stage.
 
 Run with the .env loaded (HF_TOKEN, CRASHDIAG_SANDBOX_URL, CRASHDIAG_API_TOKEN).
@@ -10,9 +10,9 @@ Usage:
 
 The generated files land in data/ with unique names so a single upload
 stage can hold all curricula:
-  sft_train.jsonl / sft_eval.jsonl        (v1, with completions)
-  grpo_train.jsonl / grpo_eval.jsonl      (v1, answer-free)
-  grpo_hard_train.jsonl / grpo_hard_eval.jsonl  (v3-hard, answer-free)
+  sft_train.jsonl / sft_eval.jsonl              (v1, with completions)
+  grpo_train.jsonl / grpo_eval.jsonl            (v1, answer-free)
+  grpo_hard_train.jsonl / grpo_hard_eval.jsonl  (hard-v4, answer-free)
 """
 
 from __future__ import annotations
@@ -59,13 +59,13 @@ def main() -> int:
         "--hard-train-samples-per-fault",
         type=int,
         default=24,
-        help="v3-hard training variations per fault (default 24)",
+        help="hard-v4 training variations per fault (default 24)",
     )
     parser.add_argument(
         "--hard-eval-samples-per-fault",
         type=int,
         default=8,
-        help="v3-hard evaluation variations per fault (default 8)",
+        help="hard-v4 evaluation variations per fault (default 8)",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-id", default=None, help="explicit run ID")
@@ -101,7 +101,7 @@ def main() -> int:
         eval_samples_per_fault=args.hard_eval_samples_per_fault,
         seed=args.seed,
     )
-    print("wrote v3-hard GRPO dataset")
+    print("wrote hard-v4 GRPO dataset")
 
     from training.artifacts import (
         ArtifactConfig,
@@ -134,7 +134,8 @@ def main() -> int:
             "hard_train_samples_per_fault": args.hard_train_samples_per_fault,
             "hard_eval_samples_per_fault": args.hard_eval_samples_per_fault,
             "schema_version": 1,
-            "hard_scenario_schema_version": 3,
+            "hard_scenario_schema_version": 4,
+            "hard_curriculum_version": 4,
         },
     )
     uploader.upload_files(
@@ -153,7 +154,7 @@ def main() -> int:
             "seed": args.seed,
             "mechanically_validated": True,
             "grpo_targets_included": False,
-            "curricula": ["v1", "hard-v3"],
+            "curricula": ["v1", "hard-v4"],
         },
     )
     uploader.complete_run({"stages": ["datasets"]})

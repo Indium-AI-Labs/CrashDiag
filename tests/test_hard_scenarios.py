@@ -45,6 +45,7 @@ class HardScenarioTests(unittest.TestCase):
                         '"healthy_below_percent"',
                     ):
                         self.assertNotIn(forbidden, text)
+                    self.assertNotIn('"candidate_repairs"', text)
                     sandbox.wait_and_observe()
                     self.assertFalse(fault.is_resolved(sandbox))
                     action = hard_expert_action(fault_name)
@@ -86,7 +87,7 @@ class HardScenarioTests(unittest.TestCase):
             self.assertNotIn('"completion"', serialized)
             self.assertNotIn('"answer"', serialized)
             self.assertNotIn('"target"', serialized)
-            self.assertEqual(row["scenario_schema_version"], 3)
+            self.assertEqual(row["scenario_schema_version"], 4)
             self.assertEqual(row["curriculum_version"], HARD_CURRICULUM_VERSION)
             self.assertEqual(
                 row["metadata"]["curriculum_version"],

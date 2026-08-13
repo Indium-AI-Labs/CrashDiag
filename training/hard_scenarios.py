@@ -25,9 +25,10 @@ from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 from .common import FAULT_NAMES, fault_for_name
 
 
-HARD_SCENARIO_SCHEMA_VERSION = 3
-HARD_CURRICULUM_VERSION = 3
+HARD_SCENARIO_SCHEMA_VERSION = 4
+HARD_CURRICULUM_VERSION = 4
 HARD_SCENARIO_PROFILES = ("redacted", "noisy", "shifted_noisy")
+HARD_SCENARIO_SCHEMA_VERSION_V3 = 3
 HARD_SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
 Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
 Choose exactly one action from this list:
@@ -77,6 +78,55 @@ _OPAQUE_SIGNATURES = {
     "database_pool_exhaustion": "sig-8e91",
     "dns_resolution_failure": "sig-31d7",
     "rate_limit_misconfiguration": "sig-65a0",
+}
+
+_OPAQUE_SIGNATURES_V4 = {
+    "oom_kill": "sig-7f3a",
+    "tls_certificate_failure": "sig-7f3a",
+    "bad_env_var": "sig-c91e",
+    "file_permission_failure": "sig-c91e",
+    "broken_db_connection": "sig-2bd8",
+    "schema_migration_pending": "sig-2bd8",
+    "dependency_mismatch": "sig-a64c",
+    "database_pool_exhaustion": "sig-a64c",
+    "disk_full": "sig-54d1",
+    "dns_resolution_failure": "sig-54d1",
+    "port_proxy_misconfig": "sig-e83b",
+    "rate_limit_misconfiguration": "sig-e83b",
+    "missing_secret": "sig-19af",
+    "cache_corruption": "sig-19af",
+    "feature_flag_misconfiguration": "sig-b276",
+    "redis_connection_failure": "sig-b276",
+    "message_queue_connection_failure": "sig-d508",
+    "object_storage_credentials_failure": "sig-d508",
+}
+
+_SENSOR_POOL = (
+    "sensor-01", "sensor-02", "sensor-03", "sensor-04", "sensor-05",
+    "sensor-06", "sensor-07", "sensor-08", "sensor-09", "sensor-10",
+    "sensor-11", "sensor-12", "sensor-13", "sensor-14", "sensor-15",
+    "sensor-16", "sensor-17", "sensor-18", "sensor-19", "sensor-20",
+)
+
+_FAULT_SIGNAL_BIAS: dict[str, tuple[str, ...]] = {
+    "oom_kill": ("sensor-01", "sensor-04", "sensor-11"),
+    "bad_env_var": ("sensor-02", "sensor-05", "sensor-12"),
+    "broken_db_connection": ("sensor-02", "sensor-06", "sensor-13"),
+    "dependency_mismatch": ("sensor-03", "sensor-07", "sensor-14"),
+    "disk_full": ("sensor-03", "sensor-08", "sensor-15"),
+    "port_proxy_misconfig": ("sensor-04", "sensor-09", "sensor-16"),
+    "missing_secret": ("sensor-05", "sensor-10", "sensor-17"),
+    "feature_flag_misconfiguration": ("sensor-06", "sensor-11", "sensor-18"),
+    "redis_connection_failure": ("sensor-07", "sensor-12", "sensor-19"),
+    "message_queue_connection_failure": ("sensor-08", "sensor-13", "sensor-20"),
+    "object_storage_credentials_failure": ("sensor-09", "sensor-14", "sensor-01"),
+    "cache_corruption": ("sensor-10", "sensor-15", "sensor-02"),
+    "tls_certificate_failure": ("sensor-11", "sensor-16", "sensor-03"),
+    "file_permission_failure": ("sensor-12", "sensor-17", "sensor-04"),
+    "schema_migration_pending": ("sensor-13", "sensor-18", "sensor-05"),
+    "database_pool_exhaustion": ("sensor-14", "sensor-19", "sensor-06"),
+    "dns_resolution_failure": ("sensor-15", "sensor-20", "sensor-07"),
+    "rate_limit_misconfiguration": ("sensor-16", "sensor-01", "sensor-08"),
 }
 
 _ACTION_BY_FAULT = {
@@ -389,13 +439,97 @@ def prepare_hard_scenario(
     return fault, target, rng
 
 
-def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
-    """Return evidence-only opaque telemetry for the default v1 curriculum.
+def _v4_signals(fault_name: str, internal_fingerprint: str) -> list[str]:
+    biased = _FAULT_SIGNAL_BIAS.get(fault_name, ())
+    seed = hashlib.sha256(f"crashdiag:v4:signals:{internal_fingerprint}".encode("utf-8")).digest()
+    rng = random.Random(int.from_bytes(seed[:8], "big"))
+    chosen: list[str] = []
+    pool = list(_SENSOR_POOL)
+    rng.shuffle(pool)
+    for sensor in biased[:3]:
+        if sensor not in chosen:
+            chosen.append(sensor)
+    for sensor in pool:
+        if len(chosen) >= 5:
+            break
+        if sensor not in chosen:
+            chosen.append(sensor)
+    chosen = chosen[:5]
+    result: list[str] = []
+    for idx, sensor in enumerate(chosen):
+        is_biased = sensor in biased
+        roll = rng.random()
+        if is_biased:
+            level = "red" if roll < 0.55 else "amber" if roll < 0.85 else "nominal"
+        else:
+            level = "nominal" if roll < 0.55 else "amber" if roll < 0.85 else "red"
+        noise_flip = rng.random() < 0.15
+        if noise_flip:
+            level = {"red": "nominal", "amber": "red", "nominal": "amber"}[level]
+        result.append(f"{sensor}:{level}")
+    result.sort()
+    return result
 
-    The active signature is intentionally non-semantic: successful adaptation
-    requires learning its relation to a repair from training data, while the
-    evaluator reconstructs the actual state from the row identity.
+
+def _v4_recent_events(observation: Mapping[str, Any]) -> list[str]:
+    history = observation.get("action_history") if isinstance(observation, Mapping) else None
+    if not isinstance(history, list):
+        recent_logs = observation.get("recent_logs") if isinstance(observation, Mapping) else None
+        if isinstance(recent_logs, list) and recent_logs:
+            return [str(entry)[:64] for entry in recent_logs[-3:]]
+        return []
+    events: list[str] = []
+    clock = int(observation.get("clock_ticks", 0)) if isinstance(observation, Mapping) else 0
+    for entry in history[-5:]:
+        if not isinstance(entry, Mapping):
+            continue
+        action = str(entry.get("action", "unknown"))
+        tick = int(entry.get("tick", clock)) if isinstance(entry.get("tick"), int) else clock
+        delta = clock - tick
+        changed = entry.get("changed")
+        status = "ok" if changed is True else "noop" if changed is False else "unknown"
+        events.append(f"{action}@tick-{delta}:{status}")
+    return events[-5:]
+
+
+def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Return evidence-only opaque telemetry for the v4 curriculum.
+
+    v4 is strictly harder than v3: signature is 2:1 ambiguous, signals are
+    fault-correlated with noise, candidate_repairs is removed (13-way), and
+    recent_events exposes only action names + recency for decoy disambiguation.
     """
+
+    fault_name = _active_fault_name(observation)
+    signature = _OPAQUE_SIGNATURES_V4.get(fault_name, _OPAQUE_SIGNATURES[fault_name])
+    ticks = int(observation.get("clock_ticks", 0))
+    internal_fingerprint = json.dumps(
+        observation,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    window = hashlib.sha256(
+        f"crashdiag:v4:telemetry:{internal_fingerprint}".encode("utf-8")
+    ).hexdigest()[:12]
+    signals = _v4_signals(fault_name, internal_fingerprint)
+    recent_events = _v4_recent_events(observation)
+    telemetry: dict[str, Any] = {
+        "signature": signature,
+        "signals": signals,
+        "sample_clock": ticks,
+    }
+    if recent_events:
+        telemetry["recent_events"] = recent_events
+    return {
+        "incident_window": {"gateway": "degraded", "http_family": "5xx", "window": window},
+        "telemetry": telemetry,
+    }
+
+
+def hard_observation_v3(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Legacy v3 observation for replay compatibility."""
 
     fault_name = _active_fault_name(observation)
     signature = _OPAQUE_SIGNATURES[fault_name]
@@ -432,10 +566,26 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def hard_observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Render the exact schema-v3 conversational prompt."""
+    """Render the exact schema-v4 conversational prompt."""
 
     content = json.dumps(
         {"observation": hard_observation(observation)},
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return [
+        {"role": "system", "content": HARD_SYSTEM_PROMPT},
+        {"role": "user", "content": content},
+    ]
+
+
+def hard_observation_messages_v3(observation: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Legacy v3 prompt for replay compatibility."""
+
+    content = json.dumps(
+        {"observation": hard_observation_v3(observation)},
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
@@ -497,7 +647,7 @@ def generate_hard_records(
     start_variation: int,
     split: str,
 ) -> list[dict[str, Any]]:
-    """Generate balanced schema-v3 records for every supported fault."""
+    """Generate balanced schema-v4 records for every supported fault."""
 
     if (
         isinstance(samples_per_fault, bool)
@@ -523,12 +673,16 @@ __all__ = [
     "HARD_CURRICULUM_VERSION",
     "HARD_SCENARIO_PROFILES",
     "HARD_SCENARIO_SCHEMA_VERSION",
+    "HARD_SCENARIO_SCHEMA_VERSION_V3",
     "HARD_SYSTEM_PROMPT",
+    "_OPAQUE_SIGNATURES_V4",
     "build_hard_grpo_sample",
     "generate_hard_records",
     "hard_expert_action",
     "hard_observation",
     "hard_observation_messages",
+    "hard_observation_messages_v3",
+    "hard_observation_v3",
     "hard_sample_seed",
     "prepare_hard_scenario",
     "profile_for_variation",

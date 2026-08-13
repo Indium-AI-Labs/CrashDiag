@@ -224,7 +224,7 @@ def mechanical_reward(
                     sandbox=sandbox,
                 )
                 expected_prompt = observation_messages(sandbox.observe())
-            elif version == HARD_SCENARIO_SCHEMA_VERSION:
+            elif version in (3, 4, HARD_SCENARIO_SCHEMA_VERSION):
                 if not isinstance(profile, str):
                     raise TypeError("schema-v2 scenarios require scenario_profile")
                 fault, _, _ = prepare_hard_scenario(
@@ -317,7 +317,7 @@ def validate_grpo_dataset(dataset: Any, label: str = "GRPO dataset") -> None:
             for value in versions
             if isinstance(value, bool)
             or not isinstance(value, int)
-            or value not in {1, HARD_SCENARIO_SCHEMA_VERSION}
+            or value not in {1, 3, HARD_SCENARIO_SCHEMA_VERSION}
         },
         key=str,
     )
