@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import random
 import re
 import secrets
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,25 +36,26 @@ from .artifacts import (
     uploader_from_args,
 )
 from .common import (
-    FAULT_NAMES,
-    action_text,
+    WORKFLOW_NAMES,
     fault_for_name,
     observation_messages,
+    workflow_text,
     write_jsonl,
 )
 from .hard_scenarios import (
     HARD_SCENARIO_PROFILES,
-    hard_expert_action,
-    prepare_hard_scenario,
+    hard_expert_workflow,
+    prepare_v5_scenario,
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 5
 DEFAULT_DATASET_BUCKET = "devaanshpa/CrashDiag"
 DEFAULT_SFT_TRAIN_OUTPUT = Path("data/sft_train.jsonl")
 DEFAULT_SFT_EVAL_OUTPUT = Path("data/sft_eval.jsonl")
 DEFAULT_GRPO_TRAIN_OUTPUT = Path("data/grpo_train.jsonl")
 DEFAULT_GRPO_EVAL_OUTPUT = Path("data/grpo_eval.jsonl")
+DEFAULT_SUMMARY_OUTPUT = Path("data/grpo_summary.json")
 _FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -130,22 +133,17 @@ def prepare_scenario(
     *,
     sandbox: SandboxBackend | None = None,
 ) -> tuple[Any, SandboxBackend, random.Random]:
-    """Rebuild the exact pre-action state represented by a dataset prompt.
+    """Rebuild the exact pre-action workflow state for a dataset prompt.
 
     GRPO uses this same function with each row's top-level ``sample_seed`` so
     reward is computed against the precise scenario the policy observed, not
-    merely another instance of the same fault class.
+    merely another instance of the same task class.
     """
 
     if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
         raise TypeError("scenario_seed must be an integer")
-    # Version 1 now uses the formerly separate hardened scenario construction:
-    # redacted telemetry, shifted deployment baselines, repaired decoys, and a
-    # recent ineffective remediation.  The profile is deterministically derived
-    # from the stable v1 sample seed, so a row can be replayed from the same
-    # top-level schema-v1 identity without serializing hidden scenario labels.
     profile = HARD_SCENARIO_PROFILES[scenario_seed % len(HARD_SCENARIO_PROFILES)]
-    return prepare_hard_scenario(
+    return prepare_v5_scenario(
         fault_name,
         scenario_seed,
         profile,
@@ -153,15 +151,10 @@ def prepare_scenario(
     )
 
 
-def expert_action(
-    fault_name: str,
-    sandbox: MockSandbox | SandboxBackend,
-    rng: random.Random | None,
-) -> dict[str, Any]:
-    """Return the parameter-free repair proved by the hardened v1 scenario."""
+def expert_workflow(fault_name: str) -> dict[str, Any]:
+    """Return the ordered multi-action repair proved by the v5 scenario."""
 
-    del sandbox, rng
-    return hard_expert_action(fault_name)
+    return hard_expert_workflow(fault_name)
 
 
 def build_validated_sample(
@@ -171,7 +164,7 @@ def build_validated_sample(
     variation_index: int,
     split: str = "train",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build matching SFT/GRPO rows after executing the SFT target.
+    """Build matching SFT/GRPO rows after executing the expert workflow.
 
     The observation is captured before the expert acts.  A new sandbox is used
     for each call, so validation cannot pass because an earlier scenario left
@@ -190,35 +183,47 @@ def build_validated_sample(
         raise ValueError("split must be 'train' or 'eval'")
 
     current_seed = sample_seed(base_seed, fault_name, variation_index)
-    fault, sandbox_backend, rng = prepare_scenario(fault_name, current_seed)
+    workflow, sandbox_backend, _ = prepare_scenario(fault_name, current_seed)
     if not isinstance(sandbox_backend, MockSandbox):
         raise TypeError("dataset generation requires MockSandbox state access")
     sandbox = sandbox_backend
 
     observation = sandbox.observe()
-    target = expert_action(fault_name, sandbox, rng)
-    sandbox.execute_action(target["action"], target["parameters"])
+    target = expert_workflow(fault_name)
+    for action in target["actions"]:
+        sandbox.execute_action(action["action"], action["parameters"])
 
-    resolved = fault.is_resolved(sandbox)
+    resolved = workflow.is_resolved(sandbox)
     health_after = sandbox.health_check()
     healthy = isinstance(health_after, Mapping) and health_after.get("healthy") is True
     if not resolved or not healthy:
         raise RuntimeError(
-            f"expert action failed mechanical validation for {fault_name!r}: "
+            f"expert workflow failed mechanical validation for {fault_name!r}: "
             f"resolved={resolved}, health={health_after!r}"
         )
 
     common: dict[str, Any] = {
-        "fault_name": fault.name,
-        "difficulty": fault.difficulty,
+        "fault_name": workflow.name,
+        "difficulty": workflow.difficulty,
+        "subfault_count": workflow.subfault_count,
         "sample_seed": current_seed,
         "variation_index": variation_index,
+        "scenario_schema_version": SCHEMA_VERSION,
+        "curriculum_version": SCHEMA_VERSION,
+        "scenario_profile": HARD_SCENARIO_PROFILES[
+            current_seed % len(HARD_SCENARIO_PROFILES)
+        ],
         "prompt": observation_messages(observation),
         "metadata": {
             "schema_version": SCHEMA_VERSION,
+            "curriculum_version": SCHEMA_VERSION,
             "mechanically_validated": True,
             "split": split,
             "variation_index": variation_index,
+            "scenario_profile": HARD_SCENARIO_PROFILES[
+                current_seed % len(HARD_SCENARIO_PROFILES)
+            ],
+            "subfault_count": workflow.subfault_count,
         },
     }
     sft = {
@@ -226,7 +231,7 @@ def build_validated_sample(
         "completion": [
             {
                 "role": "assistant",
-                "content": action_text(target["action"], target["parameters"]),
+                "content": workflow_text([entry["action"] for entry in target["actions"]]),
             }
         ],
     }
@@ -235,8 +240,12 @@ def build_validated_sample(
     grpo = {
         "fault_name": common["fault_name"],
         "difficulty": common["difficulty"],
+        "subfault_count": common["subfault_count"],
         "sample_seed": common["sample_seed"],
         "variation_index": common["variation_index"],
+        "scenario_schema_version": common["scenario_schema_version"],
+        "curriculum_version": common["curriculum_version"],
+        "scenario_profile": common["scenario_profile"],
         "prompt": [dict(message) for message in common["prompt"]],
         "metadata": dict(common["metadata"]),
     }
@@ -245,12 +254,12 @@ def build_validated_sample(
 
 def generate_records(
     *,
-    samples_per_fault: int = 128,
+    samples_per_fault: int = 20000,
     seed: int = 42,
     start_variation: int = 0,
     split: str = "train",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Generate equally sized strata for all six built-in faults."""
+    """Generate equally sized strata for all 52 workflows."""
 
     if (
         isinstance(samples_per_fault, bool)
@@ -271,9 +280,9 @@ def generate_records(
 
     sft_rows: list[dict[str, Any]] = []
     grpo_rows: list[dict[str, Any]] = []
-    # Round-robin order keeps every contiguous group of six samples stratified.
+    # Round-robin order keeps every contiguous group of 52 samples stratified.
     for variation_index in range(start_variation, start_variation + samples_per_fault):
-        for fault_name in FAULT_NAMES:
+        for fault_name in WORKFLOW_NAMES:
             sft, grpo = build_validated_sample(
                 fault_name,
                 base_seed=seed,
@@ -290,22 +299,24 @@ def generate_datasets(
     sft_eval_output: str | Path = DEFAULT_SFT_EVAL_OUTPUT,
     grpo_train_output: str | Path = DEFAULT_GRPO_TRAIN_OUTPUT,
     grpo_eval_output: str | Path = DEFAULT_GRPO_EVAL_OUTPUT,
+    summary_output: str | Path = DEFAULT_SUMMARY_OUTPUT,
     *,
-    train_samples_per_fault: int = 64,
-    eval_samples_per_fault: int = 8,
+    train_samples_per_fault: int = 20000,
+    eval_samples_per_fault: int = 2000,
     seed: int = 42,
 ) -> dict[str, int]:
-    """Validate and write four stratified datasets, returning split row counts."""
+    """Validate and write four stratified datasets plus a summary."""
 
     paths = {
         "sft_train": Path(sft_train_output),
         "sft_eval": Path(sft_eval_output),
         "grpo_train": Path(grpo_train_output),
         "grpo_eval": Path(grpo_eval_output),
+        "summary": Path(summary_output),
     }
     resolved_paths = [path.resolve() for path in paths.values()]
     if len(set(resolved_paths)) != len(resolved_paths):
-        raise ValueError("all SFT and GRPO output paths must be different files")
+        raise ValueError("all SFT, GRPO, and summary output paths must be different files")
 
     sft_train, grpo_train = generate_records(
         samples_per_fault=train_samples_per_fault,
@@ -329,6 +340,37 @@ def generate_datasets(
         raise RuntimeError("SFT and GRPO train row counts diverged")
     if counts["sft_eval"] != counts["grpo_eval"]:
         raise RuntimeError("SFT and GRPO eval row counts diverged")
+
+    def distribution(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+        return dict(sorted(Counter(str(row[key]) for row in rows).items()))
+
+    summary: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "curriculum_version": SCHEMA_VERSION,
+        "action_contract": "multi_action_workflows",
+        "curriculum": "v5",
+        "seed": seed,
+        "mechanically_validated": True,
+        "targets_included": False,
+        "workflow_count": len(WORKFLOW_NAMES),
+        "train": {
+            "rows": counts["sft_train"],
+            "samples_per_fault": train_samples_per_fault,
+            "workflow_distribution": distribution(sft_train, "fault_name"),
+            "profile_distribution": distribution(sft_train, "scenario_profile"),
+        },
+        "eval": {
+            "rows": counts["sft_eval"],
+            "samples_per_fault": eval_samples_per_fault,
+            "workflow_distribution": distribution(sft_eval, "fault_name"),
+            "profile_distribution": distribution(sft_eval, "scenario_profile"),
+        },
+    }
+    paths["summary"].parent.mkdir(parents=True, exist_ok=True)
+    paths["summary"].write_text(
+        json.dumps(summary, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
     return {"train": counts["sft_train"], "eval": counts["sft_eval"]}
 
 
@@ -354,16 +396,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--grpo-eval-output", type=Path, default=DEFAULT_GRPO_EVAL_OUTPUT
     )
     parser.add_argument(
+        "--summary-output", type=Path, default=DEFAULT_SUMMARY_OUTPUT
+    )
+    parser.add_argument(
         "--train-samples-per-fault",
         type=int,
-        default=64,
-        help="training variations for each fault (default: 64)",
+        default=20000,
+        help="training variations for each workflow (default: 20000)",
     )
     parser.add_argument(
         "--eval-samples-per-fault",
         type=int,
-        default=8,
-        help="evaluation variations for each fault (default: 8)",
+        default=2000,
+        help="evaluation variations for each workflow (default: 2000)",
     )
     parser.add_argument("--seed", type=int, default=42)
     add_artifact_arguments(parser)
@@ -407,6 +452,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.sft_eval_output,
             args.grpo_train_output,
             args.grpo_eval_output,
+            args.summary_output,
             train_samples_per_fault=args.train_samples_per_fault,
             eval_samples_per_fault=args.eval_samples_per_fault,
             seed=args.seed,
@@ -418,6 +464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.sft_eval_output,
                     args.grpo_train_output,
                     args.grpo_eval_output,
+                    args.summary_output,
                 ],
                 "datasets",
                 metadata={

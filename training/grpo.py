@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from crashdiag.agents import ACTION_SPACE, parse_action
+from crashdiag.agents import ACTION_SPACE, parse_workflow
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 from crashdiag.verifier import CrashDiagVerifier
 
@@ -34,7 +34,9 @@ from .hard_scenarios import (
     HARD_SCENARIO_PROFILES,
     HARD_SCENARIO_SCHEMA_VERSION,
     hard_observation_messages,
+    hard_observation_workflow_messages,
     prepare_hard_scenario,
+    prepare_v5_scenario,
 )
 from .reporting import ReportBundle, generate_trainer_report
 from .qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
@@ -116,17 +118,26 @@ def _broadcast_column(
     return values
 
 
-def _strict_action_json(value: Any) -> bool:
+def _strict_workflow_json(value: Any) -> bool:
     try:
         decoded = json.loads(completion_text(value))
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
-    return (
-        isinstance(decoded, dict)
-        and set(decoded).issubset({"action", "parameters"})
-        and decoded.get("action") in ACTION_SPACE
-        and isinstance(decoded.get("parameters", {}), dict)
-    )
+    if not isinstance(decoded, dict) or set(decoded) != {"actions"}:
+        return False
+    actions = decoded.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return False
+    for entry in actions:
+        if not isinstance(entry, dict):
+            return False
+        if set(entry) != {"action", "parameters"}:
+            return False
+        if entry.get("action") not in ACTION_SPACE:
+            return False
+        if not isinstance(entry.get("parameters"), dict):
+            return False
+    return True
 
 
 def _policy_action_error(exc: Exception) -> bool:
@@ -147,14 +158,15 @@ def mechanical_reward(
     prompts: list[Any] | tuple[Any, ...] | None = None,
     scenario_schema_version: list[int] | tuple[int, ...] | int | None = None,
     scenario_profile: list[str] | tuple[str, ...] | str | None = None,
+    subfault_count: list[int] | tuple[int, ...] | int | None = None,
     log_extra: Any | None = None,
     log_metric: Any | None = None,
     **_: Any,
 ) -> list[float]:
-    """Return sparse rewards after executing each generated action.
+    """Return partial-credit rewards after executing each generated workflow.
 
     ``fault_name`` is a top-level column in the generated GRPO JSONL dataset,
-    so TRL supplies the correct fault for every sampled prompt and every member
+    so TRL supplies the correct task for every sampled prompt and every member
     of its generation group.
     """
 
@@ -192,22 +204,34 @@ def mechanical_reward(
             scalar_types=(str,),
         )
     )
+    subfault_counts = (
+        [1] * count
+        if subfault_count is None
+        else _broadcast_column(
+            subfault_count,
+            count,
+            "subfault_count",
+            scalar_types=(int,),
+        )
+    )
 
     rewards: list[float] = []
-    parsed_actions: list[str] = []
+    parsed_actions: list[list[str]] = []
     resolved_values: list[bool] = []
     backend_errors: list[bool] = []
     strict_json_values: list[bool] = []
+    subfault_progress: list[float] = []
     verifier = CrashDiagVerifier()
 
-    for completion, name, scenario_seed, supplied_prompt, version, profile in zip(
-        completions, names, seeds, prompt_values, versions, profiles, strict=True
+    for completion, name, scenario_seed, supplied_prompt, version, profile, total in zip(
+        completions, names, seeds, prompt_values, versions, profiles, subfault_counts, strict=True
     ):
         sandbox: SandboxBackend | None = None
-        action_name = "wait_and_observe"
+        action_names: list[str] = ["wait_and_observe"]
         resolved = False
         backend_error = False
-        strict_json = _strict_action_json(completion)
+        strict_json = _strict_workflow_json(completion)
+        resolved_count = 0
         phase = "reconstruct"
         try:
             if isinstance(scenario_seed, bool) or not isinstance(
@@ -216,6 +240,8 @@ def mechanical_reward(
                 raise TypeError("sample_seed values must be integers")
             if isinstance(version, bool) or not isinstance(version, int):
                 raise TypeError("scenario_schema_version values must be integers")
+            if isinstance(total, bool) or not isinstance(total, int) or total < 1:
+                raise TypeError("subfault_count values must be positive integers")
             sandbox = _new_sandbox()
             if version == 1:
                 fault, _, _ = prepare_scenario(
@@ -224,7 +250,17 @@ def mechanical_reward(
                     sandbox=sandbox,
                 )
                 expected_prompt = observation_messages(sandbox.observe())
-            elif version in (3, 4, HARD_SCENARIO_SCHEMA_VERSION):
+            elif version == HARD_SCENARIO_SCHEMA_VERSION:
+                if not isinstance(profile, str):
+                    raise TypeError("schema-v5 scenarios require scenario_profile")
+                fault, _, _ = prepare_v5_scenario(
+                    str(name),
+                    scenario_seed,
+                    profile,
+                    sandbox=sandbox,
+                )
+                expected_prompt = hard_observation_workflow_messages(sandbox.observe())
+            elif version in (3, 4):
                 if not isinstance(profile, str):
                     raise TypeError("schema-v2 scenarios require scenario_profile")
                 fault, _, _ = prepare_hard_scenario(
@@ -252,13 +288,20 @@ def mechanical_reward(
             )
             if supplied_json != expected_json:
                 raise ValueError("prompt does not match the reconstructed scenario")
-            parsed = parse_action(completion_text(completion))
-            action_name = parsed["action"]
+            parsed = parse_workflow(completion_text(completion))
+            action_names = [entry["action"] for entry in parsed["actions"]]
             phase = "action"
-            sandbox.execute_action(action_name, parsed["parameters"])
+            for entry in parsed["actions"]:
+                sandbox.execute_action(entry["action"], entry["parameters"])
             phase = "verify"
             resolved = verifier.is_resolved(fault, sandbox)
-            reward = verifier.reward_for_resolution(resolved, sandbox)
+            counter = getattr(fault, "resolved_subfault_count", None)
+            resolved_count = (
+                int(counter(sandbox))
+                if callable(counter)
+                else (total if resolved else 0)
+            )
+            reward = resolved_count / total
         except Exception as exc:
             # Any exception is a failed rollout. A model-supplied parameter
             # rejected by the action contract is a policy failure; replay,
@@ -270,16 +313,18 @@ def mechanical_reward(
                 _close_sandbox(sandbox)
 
         rewards.append(float(reward))
-        parsed_actions.append(action_name)
+        parsed_actions.append(action_names)
         resolved_values.append(resolved)
         backend_errors.append(backend_error)
         strict_json_values.append(strict_json)
+        subfault_progress.append(resolved_count / total)
 
     if callable(log_extra):
         log_extra("crashdiag_action", parsed_actions)
         log_extra("crashdiag_resolved", resolved_values)
         log_extra("crashdiag_backend_error", backend_errors)
         log_extra("crashdiag_strict_json", strict_json_values)
+        log_extra("crashdiag_subfault_progress", subfault_progress)
     if callable(log_metric) and rewards:
         log_metric("crashdiag/success_rate", sum(rewards) / len(rewards))
         log_metric(
@@ -294,20 +339,22 @@ def mechanical_reward(
 
 
 def validate_grpo_dataset(dataset: Any, label: str = "GRPO dataset") -> None:
-    """Fail closed on unknown faults or non-replayable scenario schemas."""
+    """Fail closed on unknown workflows or non-replayable scenario schemas."""
 
-    required_columns = {"prompt", "fault_name", "sample_seed"}
+    required_columns = {"prompt", "fault_name", "sample_seed", "subfault_count"}
     columns = set(dataset.column_names)
     missing = required_columns.difference(columns)
     if missing:
         raise SystemExit(f"{label} is missing columns: {sorted(missing)}")
+    from crashdiag.faults.workflows import WORKFLOWS
+
     unknown_faults = sorted(
-        {str(name) for name in dataset["fault_name"] if str(name) not in FAULT_NAMES}
+        {str(name) for name in dataset["fault_name"] if str(name) not in WORKFLOWS}
     )
     if unknown_faults:
-        raise SystemExit(f"{label} contains unknown faults: {unknown_faults}")
+        raise SystemExit(f"{label} contains unknown workflows: {unknown_faults}")
     versions = (
-        [1] * len(dataset)
+        [HARD_SCENARIO_SCHEMA_VERSION] * len(dataset)
         if "scenario_schema_version" not in columns
         else list(dataset["scenario_schema_version"])
     )
@@ -327,7 +374,7 @@ def validate_grpo_dataset(dataset: Any, label: str = "GRPO dataset") -> None:
         )
     if HARD_SCENARIO_SCHEMA_VERSION in versions:
         if "scenario_profile" not in columns:
-            raise SystemExit(f"{label} schema-v2 rows require scenario_profile")
+            raise SystemExit(f"{label} schema-v5 rows require scenario_profile")
         profiles = list(dataset["scenario_profile"])
         invalid_profiles = sorted(
             {

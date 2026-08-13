@@ -21,17 +21,18 @@ from collections.abc import Mapping
 from typing import Any
 
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
+from crashdiag.faults.workflows import WORKFLOWS, workflow_for_name
 
 from .common import FAULT_NAMES, fault_for_name
 
 
-HARD_SCENARIO_SCHEMA_VERSION = 4
-HARD_CURRICULUM_VERSION = 4
+HARD_SCENARIO_SCHEMA_VERSION = 5
+HARD_CURRICULUM_VERSION = 5
 HARD_SCENARIO_PROFILES = ("redacted", "noisy", "shifted_noisy")
 HARD_SCENARIO_SCHEMA_VERSION_V3 = 3
 HARD_SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
 Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
-Choose exactly one action from this list:
+Choose an ordered list of actions from this list:
 - restart_app
 - rollback_env_var
 - fix_dependency
@@ -44,13 +45,27 @@ Choose exactly one action from this list:
 - reset_database_pool
 - restore_dns_configuration
 - restore_rate_limit_configuration
+- restart_worker
+- redeploy_container
+- clear_temp_files
+- rotate_logs
+- restore_load_balancer_config
+- restore_network_config
+- sync_replica
+- restore_database_config
+- flush_dead_letter_queue
+- restore_cache_config
+- reset_circuit_breaker
+- restore_cron_schedule
+- rebuild_index
+- restore_tls_config
 - wait_and_observe
 
 Reply with one JSON object only, using this schema:
-{"action": "<action name>", "parameters": {}}
+{"actions": [{"action": "<action name>", "parameters": {}}]}
 For this sandbox, each repair action restores its target from deployment history or declared
-configuration. The parameters value must therefore be exactly {}. Never guess or emit names,
-versions, ports, or thresholds. Do not use markdown or prose.
+configuration. The parameters value must therefore be exactly {} for every action. Never guess
+or emit names, versions, ports, or thresholds. Do not use markdown or prose.
 """
 
 _APP_ENV_VALUES = ("production", "staging", "canary")
@@ -139,6 +154,15 @@ _ACTION_BY_FAULT = {
     "tls_certificate_failure": "renew_tls_certificate", "file_permission_failure": "restore_file_permissions",
     "schema_migration_pending": "apply_database_migration", "database_pool_exhaustion": "reset_database_pool",
     "dns_resolution_failure": "restore_dns_configuration", "rate_limit_misconfiguration": "restore_rate_limit_configuration",
+    "stale_secret_rotation": "rollback_env_var", "api_key_expired": "rollback_env_var",
+    "env_var_case_mismatch": "rollback_env_var", "worker_down": "restart_worker",
+    "container_image_drift": "redeploy_container", "temp_file_pressure": "clear_temp_files",
+    "log_volume_exceeded": "rotate_logs", "load_balancer_misroute": "restore_load_balancer_config",
+    "network_config_misconfigured": "restore_network_config", "replica_lag": "sync_replica",
+    "database_config_misconfigured": "restore_database_config", "dead_letter_backlog": "flush_dead_letter_queue",
+    "cache_config_misconfigured": "restore_cache_config", "circuit_breaker_open": "reset_circuit_breaker",
+    "cron_skipped": "restore_cron_schedule", "search_index_stale": "rebuild_index",
+    "tls_config_misconfigured": "restore_tls_config",
 }
 
 _ALL_REPAIR_ACTIONS = tuple(
@@ -197,7 +221,14 @@ def _active_fault_name(observation: Mapping[str, Any]) -> str:
             "cache": "cache_corruption", "tls": "tls_certificate_failure",
             "permissions": "file_permission_failure", "migration": "schema_migration_pending",
             "db_pool": "database_pool_exhaustion", "dns": "dns_resolution_failure",
-            "rate_limit": "rate_limit_misconfiguration",
+            "rate_limit": "rate_limit_misconfiguration", "worker": "worker_down",
+            "container": "container_image_drift", "temp": "temp_file_pressure",
+            "logs": "log_volume_exceeded", "lb_config": "load_balancer_misroute",
+            "network_config": "network_config_misconfigured", "replica": "replica_lag",
+            "db_config": "database_config_misconfigured", "dead_letter": "dead_letter_backlog",
+            "cache_config": "cache_config_misconfigured", "circuit_breaker": "circuit_breaker_open",
+            "cron": "cron_skipped", "search_index": "search_index_stale",
+            "tls_config": "tls_config_misconfigured",
         }
         for service, fault_name in service_faults.items():
             if services.get(service) is False:
@@ -210,7 +241,7 @@ def hard_sample_seed(base_seed: int, fault_name: str, variation_index: int) -> i
 
     if isinstance(base_seed, bool) or not isinstance(base_seed, int):
         raise TypeError("base_seed must be an integer")
-    if fault_name not in FAULT_NAMES:
+    if fault_name not in FAULT_NAMES and fault_name not in WORKFLOWS:
         raise ValueError(f"unknown fault name: {fault_name!r}")
     if (
         isinstance(variation_index, bool)
@@ -327,28 +358,8 @@ def _vary_fault(
 def hard_expert_action(fault_name: str) -> dict[str, Any]:
     """Return the parameter-minimal action used only for mechanical validation."""
 
-    actions = {
-        "oom_kill": "restart_app",
-        "bad_env_var": "rollback_env_var",
-        "broken_db_connection": "rollback_env_var",
-        "dependency_mismatch": "fix_dependency",
-        "disk_full": "clear_disk",
-        "port_proxy_misconfig": "fix_port_config",
-        "missing_secret": "rollback_env_var",
-        "feature_flag_misconfiguration": "rollback_env_var",
-        "redis_connection_failure": "rollback_env_var",
-        "message_queue_connection_failure": "rollback_env_var",
-        "object_storage_credentials_failure": "rollback_env_var",
-        "cache_corruption": "clear_cache",
-        "tls_certificate_failure": "renew_tls_certificate",
-        "file_permission_failure": "restore_file_permissions",
-        "schema_migration_pending": "apply_database_migration",
-        "database_pool_exhaustion": "reset_database_pool",
-        "dns_resolution_failure": "restore_dns_configuration",
-        "rate_limit_misconfiguration": "restore_rate_limit_configuration",
-    }
     try:
-        action = actions[fault_name]
+        action = _ACTION_BY_FAULT[fault_name]
     except KeyError as exc:
         raise ValueError(f"unknown fault name: {fault_name!r}") from exc
     return {"action": action, "parameters": {}}
@@ -501,7 +512,10 @@ def hard_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     fault_name = _active_fault_name(observation)
-    signature = _OPAQUE_SIGNATURES_V4.get(fault_name, _OPAQUE_SIGNATURES[fault_name])
+    signature = _OPAQUE_SIGNATURES_V4.get(
+        fault_name,
+        _OPAQUE_SIGNATURES.get(fault_name, "sig-v4"),
+    )
     ticks = int(observation.get("clock_ticks", 0))
     internal_fingerprint = json.dumps(
         observation,
@@ -669,6 +683,203 @@ def generate_hard_records(
     return rows
 
 
+def _v5_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Render the v5 workflow observation.
+
+    v5 keeps the operator-style opaque telemetry from v4 but removes the legacy
+    ``candidate_repairs`` field and any hidden sub-fault labels.  The policy must
+    infer the multi-action workflow from signals, signature, and recent events.
+    """
+
+    fault_name = _active_fault_name(observation)
+    signature = _OPAQUE_SIGNATURES_V4.get(
+        fault_name,
+        _OPAQUE_SIGNATURES.get(fault_name, "sig-v5"),
+    )
+    ticks = int(observation.get("clock_ticks", 0))
+    internal_fingerprint = json.dumps(
+        observation,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    window = hashlib.sha256(
+        f"crashdiag:v5:telemetry:{internal_fingerprint}".encode("utf-8")
+    ).hexdigest()[:12]
+    signals = _v4_signals(fault_name, internal_fingerprint)
+    recent_events = _v4_recent_events(observation)
+    telemetry: dict[str, Any] = {
+        "signature": signature,
+        "signals": signals,
+        "sample_clock": ticks,
+    }
+    if recent_events:
+        telemetry["recent_events"] = recent_events
+    return {
+        "incident_window": {"gateway": "degraded", "http_family": "5xx", "window": window},
+        "telemetry": telemetry,
+    }
+
+
+def hard_observation_workflow(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the evidence-only opaque telemetry for the v5 curriculum."""
+
+    return _v5_observation(observation)
+
+
+def hard_observation_workflow_messages(
+    observation: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Render the exact schema-v5 conversational prompt."""
+
+    content = json.dumps(
+        {"observation": hard_observation_workflow(observation)},
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return [
+        {"role": "system", "content": HARD_SYSTEM_PROMPT},
+        {"role": "user", "content": content},
+    ]
+
+
+def hard_expert_workflow(fault_name: str) -> dict[str, Any]:
+    """Return the ordered expert action list used only for mechanical validation."""
+
+    workflow = workflow_for_name(fault_name)
+    return {
+        "actions": [
+            {"action": action, "parameters": {}}
+            for action in workflow.actions
+        ]
+    }
+
+
+def prepare_v5_scenario(
+    fault_name: str,
+    scenario_seed: int,
+    scenario_profile: str,
+    *,
+    sandbox: SandboxBackend | None = None,
+) -> tuple[Any, SandboxBackend, random.Random]:
+    """Reconstruct one schema-v5 workflow scenario on a local or remote sandbox."""
+
+    if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
+        raise TypeError("scenario_seed must be an integer")
+    profile = _validate_profile(scenario_profile)
+    workflow = workflow_for_name(fault_name)
+    rng = random.Random(scenario_seed)
+    target = sandbox if sandbox is not None else MockSandbox()
+
+    native_prepare = getattr(target, "prepare_v5_scenario", None)
+    if callable(native_prepare):
+        try:
+            prepared = native_prepare(fault_name, scenario_seed, profile)
+        except NotImplementedError:
+            pass
+        else:
+            if not isinstance(prepared, Mapping):
+                raise TypeError("native v5-scenario preparation must return a mapping")
+            health = prepared.get("health")
+            if not isinstance(health, Mapping) or health.get("healthy") is not False:
+                raise RuntimeError(
+                    f"native v5 scenario {fault_name!r} did not become unhealthy"
+                )
+            return workflow, target, rng
+
+    _configure_baseline(target, rng, profile)
+    _prepare_background(target, rng)
+    if profile in {"noisy", "shifted_noisy"}:
+        _add_real_stale_history(target, fault_name, rng)
+    workflow.inject(target)
+    if profile in {"noisy", "shifted_noisy"}:
+        _add_unsuccessful_remediation(target, fault_name)
+    if workflow.is_resolved(target):
+        raise RuntimeError(f"workflow {fault_name!r} was resolved immediately after injection")
+    health = target.health_check()
+    if not isinstance(health, Mapping) or health.get("healthy") is not False:
+        raise RuntimeError(f"workflow {fault_name!r} did not make the sandbox unhealthy")
+    return workflow, target, rng
+
+
+def build_v5_sample(
+    fault_name: str,
+    *,
+    base_seed: int,
+    variation_index: int,
+    split: str,
+) -> dict[str, Any]:
+    """Build one answer-free row after proving multi-action mechanical solvability."""
+
+    if split not in {"train", "eval"}:
+        raise ValueError("split must be 'train' or 'eval'")
+    profile = profile_for_variation(variation_index)
+    scenario_seed = hard_sample_seed(base_seed, fault_name, variation_index)
+    workflow, target, _ = prepare_v5_scenario(
+        fault_name,
+        scenario_seed,
+        profile,
+    )
+    prompt = hard_observation_workflow_messages(target.observe())
+    expert = hard_expert_workflow(fault_name)
+    for action in expert["actions"]:
+        target.execute_action(action["action"], action["parameters"])
+    if not workflow.is_resolved(target) or target.health_check().get("healthy") is not True:
+        raise RuntimeError(f"v5 expert workflow failed for {fault_name!r}")
+    return {
+        "fault_name": workflow.name,
+        "difficulty": workflow.difficulty,
+        "subfault_count": workflow.subfault_count,
+        "sample_seed": scenario_seed,
+        "variation_index": variation_index,
+        "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+        "curriculum_version": HARD_CURRICULUM_VERSION,
+        "scenario_profile": profile,
+        "prompt": prompt,
+        "metadata": {
+            "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+            "curriculum_version": HARD_CURRICULUM_VERSION,
+            "mechanically_validated": True,
+            "split": split,
+            "variation_index": variation_index,
+            "scenario_profile": profile,
+            "subfault_count": workflow.subfault_count,
+        },
+    }
+
+
+def generate_v5_records(
+    *,
+    samples_per_fault: int,
+    seed: int,
+    start_variation: int,
+    split: str,
+) -> list[dict[str, Any]]:
+    """Generate balanced schema-v5 records for every workflow."""
+
+    if (
+        isinstance(samples_per_fault, bool)
+        or not isinstance(samples_per_fault, int)
+        or samples_per_fault < 1
+    ):
+        raise ValueError("samples_per_fault must be a positive integer")
+    rows: list[dict[str, Any]] = []
+    for variation_index in range(start_variation, start_variation + samples_per_fault):
+        for fault_name in WORKFLOWS:
+            rows.append(
+                build_v5_sample(
+                    fault_name,
+                    base_seed=seed,
+                    variation_index=variation_index,
+                    split=split,
+                )
+            )
+    return rows
+
+
 __all__ = [
     "HARD_CURRICULUM_VERSION",
     "HARD_SCENARIO_PROFILES",
@@ -677,13 +888,19 @@ __all__ = [
     "HARD_SYSTEM_PROMPT",
     "_OPAQUE_SIGNATURES_V4",
     "build_hard_grpo_sample",
+    "build_v5_sample",
     "generate_hard_records",
+    "generate_v5_records",
     "hard_expert_action",
+    "hard_expert_workflow",
     "hard_observation",
     "hard_observation_messages",
     "hard_observation_messages_v3",
     "hard_observation_v3",
+    "hard_observation_workflow",
+    "hard_observation_workflow_messages",
     "hard_sample_seed",
     "prepare_hard_scenario",
+    "prepare_v5_scenario",
     "profile_for_variation",
 ]

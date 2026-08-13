@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from crashdiag.faults.modules import ALL_FAULTS
+from crashdiag.faults.workflows import WORKFLOWS
 from crashdiag.sandbox_apps.mock import MockSandbox
 from training.evaluate import (
     LocalTransformersAgent,
@@ -22,7 +23,6 @@ class _FaultAwareAgent:
     ACTIONS = {
         "process": "restart_app",
         "environment": "rollback_env_var",
-        "database": "rollback_env_var",
         "dependencies": "fix_dependency",
         "disk": "clear_disk",
         "port_proxy": "fix_port_config",
@@ -33,6 +33,20 @@ class _FaultAwareAgent:
         "db_pool": "reset_database_pool",
         "dns": "restore_dns_configuration",
         "rate_limit": "restore_rate_limit_configuration",
+        "worker": "restart_worker",
+        "container": "redeploy_container",
+        "temp": "clear_temp_files",
+        "logs": "rotate_logs",
+        "lb_config": "restore_load_balancer_config",
+        "network_config": "restore_network_config",
+        "replica": "sync_replica",
+        "db_config": "restore_database_config",
+        "dead_letter": "flush_dead_letter_queue",
+        "cache_config": "restore_cache_config",
+        "circuit_breaker": "reset_circuit_breaker",
+        "cron": "restore_cron_schedule",
+        "search_index": "rebuild_index",
+        "tls_config": "restore_tls_config",
     }
 
     def __init__(self) -> None:
@@ -113,23 +127,22 @@ class EvaluationTests(unittest.TestCase):
             make_sandbox=_ClosableMockSandbox,
         )
 
-        self.assertEqual(len(ALL_FAULTS), 18)
-        self.assertEqual(report["summary"]["total_episodes"], 36)
-        self.assertEqual(report["summary"]["resolved_episodes"], 36)
+        total_workflows = len(WORKFLOWS)
+        self.assertEqual(report["summary"]["total_episodes"], total_workflows * 2)
+        self.assertEqual(report["summary"]["resolved_episodes"], total_workflows * 2)
         self.assertEqual(report["summary"]["success_rate"], 1.0)
-        self.assertEqual(agent.calls, 36)
-        self.assertEqual(_ClosableMockSandbox.closed_count, 36)
-        self.assertEqual(set(report["per_fault"]), {fault.name for fault in ALL_FAULTS})
+        self.assertEqual(_ClosableMockSandbox.closed_count, total_workflows * 2)
+        self.assertEqual(set(report["per_fault"]), set(WORKFLOWS))
         for metrics in report["per_fault"].values():
             self.assertEqual(metrics["episodes"], 2)
             self.assertEqual(metrics["resolved"], 2)
             self.assertEqual(metrics["success_rate"], 1.0)
         for trajectory in report["trajectories"]:
             self.assertTrue(trajectory["resolved"])
-            self.assertEqual(len(trajectory["steps"]), 1)
-            self.assertEqual(trajectory["metadata"]["action_limit"], 1)
+            self.assertGreaterEqual(len(trajectory["steps"]), 1)
+            self.assertGreaterEqual(trajectory["metadata"]["action_limit"], 1)
             self.assertTrue(trajectory["metadata"]["scenario_prepared"])
-        for fault_name in {fault.name for fault in ALL_FAULTS}:
+        for fault_name in WORKFLOWS:
             seeds = {
                 item["metadata"]["sample_seed"]
                 for item in report["trajectories"]
@@ -139,7 +152,8 @@ class EvaluationTests(unittest.TestCase):
 
     def test_wait_policy_is_not_graded_as_success_and_report_round_trips(self) -> None:
         report = run_evaluation(_WaitAgent())
-        self.assertEqual(report["summary"]["total_episodes"], 18)
+        total_workflows = len(WORKFLOWS)
+        self.assertEqual(report["summary"]["total_episodes"], total_workflows)
         self.assertEqual(report["summary"]["resolved_episodes"], 0)
         self.assertEqual(report["summary"]["success_rate"], 0.0)
         self.assertTrue(all(not item["resolved"] for item in report["trajectories"]))
@@ -148,10 +162,10 @@ class EvaluationTests(unittest.TestCase):
             output = save_report(report, Path(directory) / "nested" / "evaluation.json")
             loaded = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(loaded, report)
-        self.assertIn("overall: 0/18 (0.0%)", format_report(report))
+        self.assertIn(f"overall: 0/{total_workflows} (0.0%)", format_report(report))
 
     def test_local_agent_generates_once_and_defensively_parses_json(self) -> None:
-        tokenizer = _FakeTokenizer('{"action":"clear_disk","parameters":{}}')
+        tokenizer = _FakeTokenizer('{"actions":[{"action":"clear_disk","parameters":{}}]}')
         model = _FakeModel()
         agent = LocalTransformersAgent(
             model,
@@ -162,7 +176,7 @@ class EvaluationTests(unittest.TestCase):
 
         action = agent.choose_action({"disk": {"used_percent": 99.0}})
 
-        self.assertEqual(action, {"action": "clear_disk", "parameters": {}})
+        self.assertEqual(action, {"actions": [{"action": "clear_disk", "parameters": {}}]})
         self.assertEqual(model.generate_calls, 1)
         self.assertEqual(tokenizer.template_calls, 1)
         self.assertEqual(tokenizer.decode_calls, 1)
@@ -177,7 +191,7 @@ class EvaluationTests(unittest.TestCase):
 
         action = LocalTransformersAgent(model, tokenizer).choose_action({})
 
-        self.assertEqual(action, {"action": "wait_and_observe", "parameters": {}})
+        self.assertEqual(action, {"actions": [{"action": "wait_and_observe", "parameters": {}}]})
         self.assertEqual(model.generate_calls, 1)
 
     def test_parser_exposes_endpoint_and_remote_sandbox_options(self) -> None:

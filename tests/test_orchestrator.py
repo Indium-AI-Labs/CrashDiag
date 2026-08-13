@@ -25,6 +25,20 @@ class _FaultAwareScriptedAgent:
         "db_pool": "reset_database_pool",
         "dns": "restore_dns_configuration",
         "rate_limit": "restore_rate_limit_configuration",
+        "worker": "restart_worker",
+        "container": "redeploy_container",
+        "temp": "clear_temp_files",
+        "logs": "rotate_logs",
+        "lb_config": "restore_load_balancer_config",
+        "network_config": "restore_network_config",
+        "replica": "sync_replica",
+        "db_config": "restore_database_config",
+        "dead_letter": "flush_dead_letter_queue",
+        "cache_config": "restore_cache_config",
+        "circuit_breaker": "reset_circuit_breaker",
+        "cron": "restore_cron_schedule",
+        "search_index": "rebuild_index",
+        "tls_config": "restore_tls_config",
     }
 
     def choose_action(

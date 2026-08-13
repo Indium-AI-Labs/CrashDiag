@@ -21,10 +21,11 @@ class ExactEvaluationProgressTests(unittest.TestCase):
 
         def reward(completions, *, log_extra, **kwargs):
             del completions, kwargs
-            log_extra("crashdiag_action", ["restart_app"])
+            log_extra("crashdiag_action", [["restart_app"]])
             log_extra("crashdiag_resolved", [True])
             log_extra("crashdiag_backend_error", [False])
             log_extra("crashdiag_strict_json", [True])
+            log_extra("crashdiag_subfault_progress", [1.0])
             return [1.0]
 
         with patch("training.evaluate_jsonl.mechanical_reward", side_effect=reward):

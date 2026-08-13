@@ -191,19 +191,41 @@ class Orchestrator:
         if resolution_error:
             trajectory.error = self._join_errors(trajectory.error, resolution_error)
 
-        for step_index in range(step_limit):
+        pending_actions: list[tuple[str, dict[str, Any]]] = []
+        step_index = 0
+        while step_index < step_limit:
             if resolved:
                 break
 
             agent_error: str | None = None
             raw_action: Any = None
-            try:
-                raw_action = self._ask_agent(observation, trajectory.steps)
-                action, parameters, parse_error = self._normalise_action(raw_action)
-                agent_error = parse_error
-            except Exception as exc:
-                action, parameters = self.DEFAULT_ACTION, {}
-                agent_error = self._format_error("agent failed", exc)
+            if pending_actions:
+                action, parameters = pending_actions.pop(0)
+            else:
+                try:
+                    raw_action = self._ask_agent(observation, trajectory.steps)
+                    if isinstance(raw_action, Mapping) and "actions" in raw_action:
+                        entries = raw_action.get("actions")
+                        if isinstance(entries, list) and entries:
+                            first, parameters, parse_error = self._normalise_action(raw_action)
+                            agent_error = parse_error
+                            remaining = [
+                                (entry.get("action"), dict(entry.get("parameters", {})))
+                                for entry in entries[1:]
+                                if isinstance(entry, Mapping)
+                                and isinstance(entry.get("action"), str)
+                                and isinstance(entry.get("parameters", {}), Mapping)
+                            ]
+                            action = first
+                            pending_actions = remaining + pending_actions
+                        else:
+                            action, parameters, agent_error = self.DEFAULT_ACTION, {}, "invalid workflow output; defaulted to wait_and_observe"
+                    else:
+                        action, parameters, parse_error = self._normalise_action(raw_action)
+                        agent_error = parse_error
+                except Exception as exc:
+                    action, parameters = self.DEFAULT_ACTION, {}
+                    agent_error = self._format_error("agent failed", exc)
 
             action_result: Any = None
             action_error: str | None = None
@@ -237,6 +259,7 @@ class Orchestrator:
             trajectory.add_step(step)
 
             observation = observation_after
+            step_index += 1
 
         trajectory.final_observation = _json_safe(observation)
         return self._finish(
@@ -400,6 +423,20 @@ class Orchestrator:
 
     @classmethod
     def _normalise_action(cls, raw_action: Any) -> tuple[str, dict[str, Any], str | None]:
+        # A workflow-shaped reply ({actions: [...]}) is executed one entry at a
+        # time by expanding it into individual steps below. This branch returns
+        # the first action and the caller re-queues the remainder.
+        if isinstance(raw_action, Mapping) and "actions" in raw_action:
+            raw_actions = raw_action.get("actions")
+            if isinstance(raw_actions, list) and raw_actions:
+                first = raw_actions[0]
+                if isinstance(first, Mapping):
+                    action = first.get("action")
+                    parameters = first.get("parameters", {})
+                    if isinstance(action, str) and action.strip() and isinstance(parameters, Mapping):
+                        return action.strip(), dict(parameters), None
+            return cls.DEFAULT_ACTION, {}, "invalid workflow output; defaulted to wait_and_observe"
+
         if isinstance(raw_action, str) and raw_action.strip():
             return raw_action.strip(), {}, None
         if not isinstance(raw_action, Mapping):

@@ -1,4 +1,4 @@
-"""Schema-v3 hard-scenario determinism and mechanical-solvability tests."""
+"""Schema-v5 workflow-scenario determinism and mechanical-solvability tests."""
 
 from __future__ import annotations
 
@@ -6,31 +6,31 @@ import json
 import unittest
 from collections import Counter
 
-from training.common import FAULT_NAMES
+from crashdiag.faults.workflows import WORKFLOWS
 from training.hard_scenarios import (
     HARD_CURRICULUM_VERSION,
     HARD_SCENARIO_PROFILES,
-    build_hard_grpo_sample,
-    generate_hard_records,
-    hard_expert_action,
-    hard_observation_messages,
+    build_v5_sample,
+    generate_v5_records,
+    hard_expert_workflow,
+    hard_observation_workflow_messages,
     hard_sample_seed,
-    prepare_hard_scenario,
+    prepare_v5_scenario,
 )
 
 
 class HardScenarioTests(unittest.TestCase):
-    def test_every_profile_and_fault_is_solvable_with_one_bounded_action(self) -> None:
+    def test_every_profile_and_workflow_is_solvable_with_ordered_actions(self) -> None:
         for profile_index, profile in enumerate(HARD_SCENARIO_PROFILES):
-            for fault_name in FAULT_NAMES:
-                with self.subTest(profile=profile, fault=fault_name):
+            for fault_name in WORKFLOWS:
+                with self.subTest(profile=profile, workflow=fault_name):
                     seed = hard_sample_seed(42, fault_name, profile_index)
-                    fault, sandbox, _ = prepare_hard_scenario(
+                    workflow, sandbox, _ = prepare_v5_scenario(
                         fault_name,
                         seed,
                         profile,
                     )
-                    prompt = hard_observation_messages(sandbox.observe())
+                    prompt = hard_observation_workflow_messages(sandbox.observe())
                     self.assertIn(
                         "parameters value must therefore be exactly {}",
                         prompt[0]["content"],
@@ -47,37 +47,42 @@ class HardScenarioTests(unittest.TestCase):
                         self.assertNotIn(forbidden, text)
                     self.assertNotIn('"candidate_repairs"', text)
                     sandbox.wait_and_observe()
-                    self.assertFalse(fault.is_resolved(sandbox))
-                    action = hard_expert_action(fault_name)
-                    sandbox.execute_action(action["action"], action["parameters"])
-                    self.assertTrue(fault.is_resolved(sandbox))
+                    self.assertFalse(workflow.is_resolved(sandbox))
+                    expert = hard_expert_workflow(fault_name)
+                    for action in expert["actions"]:
+                        sandbox.execute_action(action["action"], action["parameters"])
+                    self.assertTrue(workflow.is_resolved(sandbox))
                     self.assertTrue(sandbox.health_check()["healthy"])
 
     def test_generation_is_answer_free_deterministic_balanced_and_disjoint(self) -> None:
-        first = generate_hard_records(
+        first = generate_v5_records(
             samples_per_fault=6,
             seed=42,
             start_variation=0,
             split="train",
         )
-        second = generate_hard_records(
+        second = generate_v5_records(
             samples_per_fault=6,
             seed=42,
             start_variation=0,
             split="train",
         )
-        evaluation = generate_hard_records(
+        evaluation = generate_v5_records(
             samples_per_fault=3,
             seed=42,
             start_variation=6,
             split="eval",
         )
         self.assertEqual(first, second)
-        self.assertEqual(len(first), 108)
-        self.assertEqual(Counter(row["fault_name"] for row in first), {name: 6 for name in FAULT_NAMES})
+        expected = len(WORKFLOWS) * 6
+        self.assertEqual(len(first), expected)
+        self.assertEqual(
+            Counter(row["fault_name"] for row in first),
+            {name: 6 for name in WORKFLOWS},
+        )
         self.assertEqual(
             Counter(row["scenario_profile"] for row in first),
-            {profile: 36 for profile in HARD_SCENARIO_PROFILES},
+            {profile: expected // 3 for profile in HARD_SCENARIO_PROFILES},
         )
         train_seeds = {row["sample_seed"] for row in first}
         eval_seeds = {row["sample_seed"] for row in evaluation}
@@ -87,7 +92,7 @@ class HardScenarioTests(unittest.TestCase):
             self.assertNotIn('"completion"', serialized)
             self.assertNotIn('"answer"', serialized)
             self.assertNotIn('"target"', serialized)
-            self.assertEqual(row["scenario_schema_version"], 4)
+            self.assertEqual(row["scenario_schema_version"], 5)
             self.assertEqual(row["curriculum_version"], HARD_CURRICULUM_VERSION)
             self.assertEqual(
                 row["metadata"]["curriculum_version"],
@@ -99,20 +104,20 @@ class HardScenarioTests(unittest.TestCase):
         observations = []
         for variation in range(6):
             seed = hard_sample_seed(9, "port_proxy_misconfig", variation)
-            _, sandbox, _ = prepare_hard_scenario(
+            _, sandbox, _ = prepare_v5_scenario(
                 "port_proxy_misconfig",
                 seed,
                 "shifted_noisy",
             )
             raw = sandbox.observe()
             observations.append(raw["network"]["app_port"])
-            prompt = hard_observation_messages(raw)
+            prompt = hard_observation_workflow_messages(raw)
             self.assertNotIn(str(raw["network"]["app_port"]), prompt[1]["content"])
         self.assertGreater(len(set(observations)), 1)
 
     def test_build_sample_profile_follows_variation(self) -> None:
         rows = [
-            build_hard_grpo_sample(
+            build_v5_sample(
                 "oom_kill",
                 base_seed=42,
                 variation_index=index,

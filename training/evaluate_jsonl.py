@@ -133,6 +133,7 @@ def evaluate_rows(
             scenario_profile=[row.get("scenario_profile")]
             if int(row.get("scenario_schema_version", 1)) >= 2
             else None,
+            subfault_count=[row.get("subfault_count", 1)],
             log_extra=log_extra,
         )
         results.append(
@@ -142,12 +143,14 @@ def evaluate_rows(
                 "scenario_profile": row.get("scenario_profile"),
                 "scenario_schema_version": row.get("scenario_schema_version", 1),
                 "sample_seed": row.get("sample_seed"),
+                "subfault_count": row.get("subfault_count", 1),
                 "completion": completion,
                 "action": extras["crashdiag_action"][0],
                 "reward": float(rewards[0]),
                 "resolved": bool(extras["crashdiag_resolved"][0]),
                 "backend_error": bool(extras["crashdiag_backend_error"][0]),
                 "strict_json": bool(extras["crashdiag_strict_json"][0]),
+                "subfault_progress": float(extras["crashdiag_subfault_progress"][0]),
             }
         )
         resolved = sum(bool(item["resolved"]) for item in results)

@@ -216,6 +216,48 @@ class HttpSandbox(SandboxBackend):
     def restore_rate_limit_configuration(self) -> dict[str, Any]:
         return self._action("restore_rate_limit_configuration")
 
+    def restart_worker(self) -> dict[str, Any]:
+        return self._action("restart_worker")
+
+    def redeploy_container(self) -> dict[str, Any]:
+        return self._action("redeploy_container")
+
+    def clear_temp_files(self) -> dict[str, Any]:
+        return self._action("clear_temp_files")
+
+    def rotate_logs(self) -> dict[str, Any]:
+        return self._action("rotate_logs")
+
+    def restore_load_balancer_config(self) -> dict[str, Any]:
+        return self._action("restore_load_balancer_config")
+
+    def restore_network_config(self) -> dict[str, Any]:
+        return self._action("restore_network_config")
+
+    def sync_replica(self) -> dict[str, Any]:
+        return self._action("sync_replica")
+
+    def restore_database_config(self) -> dict[str, Any]:
+        return self._action("restore_database_config")
+
+    def flush_dead_letter_queue(self) -> dict[str, Any]:
+        return self._action("flush_dead_letter_queue")
+
+    def restore_cache_config(self) -> dict[str, Any]:
+        return self._action("restore_cache_config")
+
+    def reset_circuit_breaker(self) -> dict[str, Any]:
+        return self._action("reset_circuit_breaker")
+
+    def restore_cron_schedule(self) -> dict[str, Any]:
+        return self._action("restore_cron_schedule")
+
+    def rebuild_index(self) -> dict[str, Any]:
+        return self._action("rebuild_index")
+
+    def restore_tls_config(self) -> dict[str, Any]:
+        return self._action("restore_tls_config")
+
     def wait_and_observe(self) -> dict[str, Any]:
         return self._action("wait_and_observe")
 
@@ -299,6 +341,38 @@ class HttpSandbox(SandboxBackend):
         if not isinstance(observation, dict) or not isinstance(health, dict):
             raise SandboxTransportError(
                 "hard-scenario response has no observation/health objects"
+            )
+        return result
+
+    def prepare_v5_scenario(
+        self,
+        fault_name: str,
+        sample_seed: int,
+        scenario_profile: str,
+    ) -> dict[str, Any]:
+        """Prepare v5 workflow state in one authenticated setup request."""
+
+        try:
+            result = self._request(
+                "POST",
+                f"{self._current_session_path()}/scenarios/v5",
+                {
+                    "fault_name": fault_name,
+                    "sample_seed": sample_seed,
+                    "scenario_profile": scenario_profile,
+                },
+            )
+        except SandboxHTTPError as exc:
+            if exc.status == 404:
+                raise NotImplementedError(
+                    "remote sandbox does not support atomic v5 scenarios"
+                ) from exc
+            raise
+        observation = result.get("observation")
+        health = result.get("health")
+        if not isinstance(observation, dict) or not isinstance(health, dict):
+            raise SandboxTransportError(
+                "v5-scenario response has no observation/health objects"
             )
         return result
 

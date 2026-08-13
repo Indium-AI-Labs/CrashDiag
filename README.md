@@ -1,24 +1,31 @@
 # CrashDiag
 
 CrashDiag is a mechanically verified environment for training an infrastructure
-repair policy. A policy selects one bounded JSON action; a disposable sandbox
-executes it and determines reward from real state and health checks. No LLM
-grader is used.
+repair policy. A policy selects an ordered JSON workflow; a disposable sandbox
+executes the actions in order and determines reward from real state and health
+checks. No LLM grader is used.
 
-The fresh workflow trains a single model, `Qwen/Qwen3-14B`, with BF16 NF4
-4-bit QLoRA on one 40 GB A100. Qwen3 thinking is disabled in training and
-evaluation so the policy produces only the required action JSON.
+The fresh workflow trains a single model, `Qwen/Qwen2.5-3B-Instruct`, with BF16
+NF4 4-bit QLoRA. Qwen thinking is disabled in training and evaluation so the
+policy produces only the required action JSON.
 
 ## Included
 
-- 18 injectable, mechanically repairable fault families.
+- 52 injectable, mechanically repairable tasks, each resolved by an ordered
+  multi-action workflow.
+- 27 repair actions (plus the `wait_and_observe` fallback).
 - Mock and HTTP sandbox backends, Docker deployment, and public Compose overlay.
-- One hardened v1 SFT/GRPO curriculum with redacted telemetry, shifted baselines,
-  repaired decoy incidents, and mechanically replayable rewards.
+- One consolidated v5 SFT/GRPO curriculum with redacted telemetry, shifted
+  baselines, repaired decoy incidents, and mechanically replayable partial-credit
+  rewards.
 - QLoRA SFT, GRPO, exact held-out evaluation, reports, and private Hugging Face
   Storage Bucket artifact persistence.
-- Four notebooks only: base evaluation, SFT, SFT evaluation, and GRPO at
-  `notebooks/qwen3_14b/`.
+- Four notebooks for the single model at `notebooks/qwen2.5_3b/`.
+
+## Documentation
+
+See the [`docs/`](docs/README.md) directory for the task catalog, action space,
+curriculum contract, dataset generation, and notebook workflow.
 
 ## Setup
 
@@ -37,15 +44,12 @@ docker compose -f compose.yaml -f compose.public.yaml up --detach --build
 curl.exe --fail https://sandbox.example.com/healthz
 ```
 
-Generate fresh hardened-v1 data (64 train and 8 eval variations per fault):
+Generate fresh v5 data (20,000 train and 2,000 eval variations per task):
 
 ```powershell
 python -m pip install -e ".[artifacts]"
-python -m training.generate_dataset --train-samples-per-fault 64 --eval-samples-per-fault 8 --seed 42
+python -m training.generate_dataset --train-samples-per-fault 20000 --eval-samples-per-fault 2000 --seed 42
 ```
-
-See [data/roadmap.md](data/roadmap.md) for the complete deployment, base-eval,
-base evaluation, SFT, GRPO, and final-evaluation sequence.
 
 ## Validation
 

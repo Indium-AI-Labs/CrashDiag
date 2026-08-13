@@ -32,5 +32,15 @@ class FaultModule(ABC):
     def is_resolved(self, instance: Any) -> bool:
         """Return whether real, current instance state proves the fault fixed."""
 
+    def local_resolved(self, instance: Any) -> bool:
+        """Return whether only this fault's owned state is fixed.
+
+        Sub-faults override this to enable workflow partial credit.  The default
+        delegates to :meth:`is_resolved`, which keeps single-fault callers working
+        without changes.
+        """
+
+        return self.is_resolved(instance)
+
 
 __all__ = ["FaultModule"]

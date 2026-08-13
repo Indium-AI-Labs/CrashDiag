@@ -21,8 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from crashdiag.agents import DEFAULT_SYSTEM_PROMPT, BlueAgent, parse_action
+from crashdiag.agents import DEFAULT_SYSTEM_PROMPT, BlueAgent, parse_workflow
 from crashdiag.faults.modules import ALL_FAULTS
+from crashdiag.faults.workflows import WORKFLOWS
 from crashdiag.orchestrator import Orchestrator, Trajectory
 from crashdiag.sandbox_apps.mock import MockSandbox, SandboxBackend
 
@@ -198,12 +199,12 @@ class LocalTransformersAgent:
         observation: Mapping[str, Any] | Any,
         history: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Return one schema-validated action, or a conservative no-op."""
+        """Return a schema-validated workflow, or a conservative no-op."""
 
         try:
-            return parse_action(self.generate_content(observation, history))
+            return parse_workflow(self.generate_content(observation, history))
         except Exception:
-            return parse_action(None)
+            return parse_workflow(None)
 
     def act(
         self,
@@ -302,14 +303,14 @@ def run_evaluation(
     *,
     episodes_per_fault: int = 1,
     make_sandbox: SandboxFactory = MockSandbox,
-    faults: Iterable[Any] = ALL_FAULTS,
+    faults: Iterable[Any] | None = None,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """Run one-action episodes for every fault and return a JSON-safe report.
+    """Run workflow episodes for every v5 task and return a JSON-safe report.
 
-    A fresh sandbox is constructed for every repetition.  The orchestrator's
-    one-step limit ensures exactly one generated action is executed, and its
-    verifier derives ``resolved`` from live sandbox state.
+    A fresh sandbox is constructed for every repetition.  The orchestrator's step
+    limit is the workflow's sub-fault count, and its verifier derives ``resolved``
+    from live sandbox state after the agent's action list is executed.
     """
 
     if (
@@ -322,19 +323,20 @@ def run_evaluation(
         raise TypeError("make_sandbox must be callable")
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
-    selected_faults = tuple(faults)
+    selected_faults = tuple(faults if faults is not None else WORKFLOWS.values())
     if not selected_faults:
         raise ValueError("at least one fault is required")
 
     trajectories: list[Trajectory] = []
     for fault in selected_faults:
         fault_name = str(getattr(fault, "name", fault.__class__.__name__))
+        step_limit = max(1, int(getattr(fault, "subfault_count", 1)))
         for episode_index in range(episodes_per_fault):
             sandbox = make_sandbox()
             try:
                 scenario_seed: int | None = None
                 episode_fault = fault
-                if fault_name in FAULT_NAMES:
+                if fault_name in WORKFLOWS:
                     variation_index = 1_000_000 + episode_index
                     scenario_seed = sample_seed(
                         seed,
@@ -347,16 +349,17 @@ def run_evaluation(
                         sandbox=sandbox,
                     )
                     episode_fault = _PreInjectedFault(prepared_fault)
+                    step_limit = int(prepared_fault.subfault_count)
                 trajectory = Orchestrator(
                     sandbox=sandbox,
                     agent=agent,
-                    max_steps=1,
+                    max_steps=step_limit,
                 ).run_episode(episode_fault)
                 trajectory.metadata.update(
                     {
                         "episode_index": episode_index,
                         "backend": type(sandbox).__name__,
-                        "action_limit": 1,
+                        "action_limit": step_limit,
                         "sample_seed": scenario_seed,
                         "scenario_prepared": scenario_seed is not None,
                     }

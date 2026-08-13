@@ -11,11 +11,12 @@ from typing import Any
 
 from crashdiag.faults.base import FaultModule
 from crashdiag.faults.modules import FAULT_TYPES
+from crashdiag.faults.workflows import WORKFLOWS
 
 
 SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
 Recent logs may include incidents that were already repaired and unsuccessful remediation attempts.
-Choose exactly one action from this list:
+Choose an ordered list of actions from this list:
 - restart_app
 - rollback_env_var
 - fix_dependency
@@ -28,18 +29,33 @@ Choose exactly one action from this list:
 - reset_database_pool
 - restore_dns_configuration
 - restore_rate_limit_configuration
+- restart_worker
+- redeploy_container
+- clear_temp_files
+- rotate_logs
+- restore_load_balancer_config
+- restore_network_config
+- sync_replica
+- restore_database_config
+- flush_dead_letter_queue
+- restore_cache_config
+- reset_circuit_breaker
+- restore_cron_schedule
+- rebuild_index
+- restore_tls_config
 - wait_and_observe
 
 Reply with one JSON object only, using this schema:
-{"action": "<action name>", "parameters": {}}
+{"actions": [{"action": "<action name>", "parameters": {}}]}
 For this sandbox, each repair action restores its target from deployment history or declared
-configuration. The parameters value must therefore be exactly {}. Never guess or emit names,
-versions, ports, or thresholds. Do not use markdown or prose.
+configuration. The parameters value must therefore be exactly {} for every action. Never guess
+or emit names, versions, ports, or thresholds. Do not use markdown or prose.
 """
-"""The parameter-free policy contract used for all v1 data and rollouts."""
+"""The parameter-free multi-action policy contract used for all v5 data and rollouts."""
 
 _FAULT_CLASSES = {fault_type().name: fault_type for fault_type in FAULT_TYPES}
 FAULT_NAMES = tuple(_FAULT_CLASSES)
+WORKFLOW_NAMES = tuple(WORKFLOWS)
 PRECISION_CHOICES = ("auto", "bf16", "fp16", "fp32")
 
 
@@ -62,6 +78,24 @@ def action_text(action: str, parameters: Mapping[str, Any] | None = None) -> str
     payload = {
         "action": action,
         "parameters": dict(parameters or {}),
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def workflow_text(actions: Sequence[str]) -> str:
+    """Serialize an ordered workflow target as ``{"actions": [...]}``."""
+
+    payload = {
+        "actions": [
+            {"action": action, "parameters": {}}
+            for action in actions
+        ]
     }
     return json.dumps(
         payload,
@@ -108,14 +142,14 @@ def completion_text(value: Any) -> str:
 
 
 def observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Build the redacted operational prompt used by the v1 curriculum."""
+    """Build the redacted operational prompt used by the v5 curriculum."""
 
     # Keep the prompt projection beside the legacy common helpers while avoiding
     # an import cycle: ``hard_scenarios`` imports ``fault_for_name`` above.
-    from .hard_scenarios import hard_observation
+    from .hard_scenarios import hard_observation_workflow
 
     content = json.dumps(
-        {"observation": hard_observation(observation)},
+        {"observation": hard_observation_workflow(observation)},
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
@@ -200,10 +234,12 @@ __all__ = [
     "FAULT_NAMES",
     "PRECISION_CHOICES",
     "SYSTEM_PROMPT",
+    "WORKFLOW_NAMES",
     "action_text",
     "completion_text",
     "fault_for_name",
     "observation_messages",
     "resolve_precision",
+    "workflow_text",
     "write_jsonl",
 ]

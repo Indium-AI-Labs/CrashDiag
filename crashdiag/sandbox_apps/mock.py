@@ -30,6 +30,20 @@ class SandboxBackend(ABC):
             "reset_database_pool",
             "restore_dns_configuration",
             "restore_rate_limit_configuration",
+            "restart_worker",
+            "redeploy_container",
+            "clear_temp_files",
+            "rotate_logs",
+            "restore_load_balancer_config",
+            "restore_network_config",
+            "sync_replica",
+            "restore_database_config",
+            "flush_dead_letter_queue",
+            "restore_cache_config",
+            "reset_circuit_breaker",
+            "restore_cron_schedule",
+            "rebuild_index",
+            "restore_tls_config",
             "wait_and_observe",
         }
     )
@@ -93,6 +107,62 @@ class SandboxBackend(ABC):
     @abstractmethod
     def restore_rate_limit_configuration(self) -> dict[str, Any]:
         """Restore the declared request-rate configuration."""
+
+    @abstractmethod
+    def restart_worker(self) -> dict[str, Any]:
+        """Restart background worker / cron / queue-consumer / monitor processes."""
+
+    @abstractmethod
+    def redeploy_container(self) -> dict[str, Any]:
+        """Restore the container image to its declared version."""
+
+    @abstractmethod
+    def clear_temp_files(self) -> dict[str, Any]:
+        """Reduce inode / temp-file pressure."""
+
+    @abstractmethod
+    def rotate_logs(self) -> dict[str, Any]:
+        """Reduce log volume below the health threshold."""
+
+    @abstractmethod
+    def restore_load_balancer_config(self) -> dict[str, Any]:
+        """Restore LB upstream route and health-check configuration."""
+
+    @abstractmethod
+    def restore_network_config(self) -> dict[str, Any]:
+        """Restore MTU / firewall port / network configuration."""
+
+    @abstractmethod
+    def sync_replica(self) -> dict[str, Any]:
+        """Bring the DB replica lag back below threshold."""
+
+    @abstractmethod
+    def restore_database_config(self) -> dict[str, Any]:
+        """Restore read/write split, replica topology, and pool sizing."""
+
+    @abstractmethod
+    def flush_dead_letter_queue(self) -> dict[str, Any]:
+        """Clear the dead-letter queue backlog."""
+
+    @abstractmethod
+    def restore_cache_config(self) -> dict[str, Any]:
+        """Restore the cache eviction policy."""
+
+    @abstractmethod
+    def reset_circuit_breaker(self) -> dict[str, Any]:
+        """Close an open circuit breaker."""
+
+    @abstractmethod
+    def restore_cron_schedule(self) -> dict[str, Any]:
+        """Re-enable cron jobs."""
+
+    @abstractmethod
+    def rebuild_index(self) -> dict[str, Any]:
+        """Rebuild a stale search index."""
+
+    @abstractmethod
+    def restore_tls_config(self) -> dict[str, Any]:
+        """Restore TLS chain completeness / CA / HSTS configuration."""
 
     @abstractmethod
     def wait_and_observe(self) -> dict[str, Any]:
@@ -193,6 +263,20 @@ class MockSandbox(SandboxBackend):
         "db_pool": True,
         "dns": True,
         "rate_limit": True,
+        "worker": True,
+        "container": True,
+        "temp": True,
+        "logs": True,
+        "lb_config": True,
+        "network_config": True,
+        "replica": True,
+        "db_config": True,
+        "dead_letter": True,
+        "cache_config": True,
+        "circuit_breaker": True,
+        "cron": True,
+        "search_index": True,
+        "tls_config": True,
     }
 
     def __init__(self) -> None:
@@ -437,6 +521,48 @@ class MockSandbox(SandboxBackend):
 
     def restore_rate_limit_configuration(self) -> dict[str, Any]:
         return self._restore_service("rate_limit", "restore_rate_limit_configuration")
+
+    def restart_worker(self) -> dict[str, Any]:
+        return self._restore_service("worker", "restart_worker")
+
+    def redeploy_container(self) -> dict[str, Any]:
+        return self._restore_service("container", "redeploy_container")
+
+    def clear_temp_files(self) -> dict[str, Any]:
+        return self._restore_service("temp", "clear_temp_files")
+
+    def rotate_logs(self) -> dict[str, Any]:
+        return self._restore_service("logs", "rotate_logs")
+
+    def restore_load_balancer_config(self) -> dict[str, Any]:
+        return self._restore_service("lb_config", "restore_load_balancer_config")
+
+    def restore_network_config(self) -> dict[str, Any]:
+        return self._restore_service("network_config", "restore_network_config")
+
+    def sync_replica(self) -> dict[str, Any]:
+        return self._restore_service("replica", "sync_replica")
+
+    def restore_database_config(self) -> dict[str, Any]:
+        return self._restore_service("db_config", "restore_database_config")
+
+    def flush_dead_letter_queue(self) -> dict[str, Any]:
+        return self._restore_service("dead_letter", "flush_dead_letter_queue")
+
+    def restore_cache_config(self) -> dict[str, Any]:
+        return self._restore_service("cache_config", "restore_cache_config")
+
+    def reset_circuit_breaker(self) -> dict[str, Any]:
+        return self._restore_service("circuit_breaker", "reset_circuit_breaker")
+
+    def restore_cron_schedule(self) -> dict[str, Any]:
+        return self._restore_service("cron", "restore_cron_schedule")
+
+    def rebuild_index(self) -> dict[str, Any]:
+        return self._restore_service("search_index", "rebuild_index")
+
+    def restore_tls_config(self) -> dict[str, Any]:
+        return self._restore_service("tls_config", "restore_tls_config")
 
     def wait_and_observe(self) -> dict[str, Any]:
         self.clock_ticks += 1

@@ -19,11 +19,7 @@ NOTEBOOK_ROOT = ROOT / "notebooks"
 
 # model_slug -> huggingface id
 MODELS: dict[str, str] = {
-    "qwen2.5_14b": "Qwen/Qwen2.5-14B-Instruct",
-    "qwen2.5_7b": "Qwen/Qwen2.5-7B-Instruct",
     "qwen2.5_3b": "Qwen/Qwen2.5-3B-Instruct",
-    "qwen2.5_1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
-    "qwen2.5_0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
 }
 
 BUCKET_ID = "devaanshpa/CrashDiag"
@@ -439,10 +435,10 @@ print(f"sft_train={{DATASET_DIR / 'sft_train.jsonl'}}")'''
 
 
 def _hard_curriculum_cell() -> str:
-    return f'''CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "hard-v4").strip().lower()
-HARD = CURRICULUM in ("hard-v3", "hard-v4")
-TRAIN_FILE = "grpo_hard_train.jsonl" if HARD else "grpo_train.jsonl"
-EVAL_FILE = "grpo_hard_eval.jsonl" if HARD else "grpo_eval.jsonl"'''
+    return f'''CURRICULUM = os.environ.get("CRASHDIAG_CURRICULUM", "v5").strip().lower()
+HARD = CURRICULUM in ("v5", "hard-v5", "hard-v4", "hard-v3")
+TRAIN_FILE = "grpo_train.jsonl"
+EVAL_FILE = "grpo_eval.jsonl"'''
 
 
 def build_sft_all() -> dict:
@@ -706,14 +702,26 @@ for _slug, _s, _strict, _err, _ in _chart_rows:
 
 
 def main() -> int:
-    NOTEBOOK_ROOT.mkdir(parents=True, exist_ok=True)
-    # Remove the old qwen3_14b workflow.
-    old = NOTEBOOK_ROOT / "qwen3_14b"
-    if old.is_dir():
-        import shutil
+    import shutil
 
-        shutil.rmtree(old)
-        print(f"removed {old}")
+    NOTEBOOK_ROOT.mkdir(parents=True, exist_ok=True)
+    # Remove obsolete multi-model and sweep notebooks from the previous workflow.
+    for slug in ("qwen2.5_14b", "qwen2.5_7b", "qwen2.5_1.5b", "qwen2.5_0.5b", "qwen3_14b"):
+        stale = NOTEBOOK_ROOT / slug
+        if stale.is_dir():
+            shutil.rmtree(stale)
+            print(f"removed {stale}")
+    for name in (
+        "eval_all_baselines.ipynb",
+        "eval_all_sft.ipynb",
+        "eval_all_grpo.ipynb",
+        "sft_all.ipynb",
+        "grpo_all.ipynb",
+    ):
+        stale = NOTEBOOK_ROOT / name
+        if stale.is_file():
+            stale.unlink()
+            print(f"removed {stale}")
     for slug, base in MODELS.items():
         folder = NOTEBOOK_ROOT / slug
         folder.mkdir(parents=True, exist_ok=True)
@@ -728,16 +736,6 @@ def main() -> int:
                 json.dumps(nb, indent=1) + "\n", encoding="utf-8"
             )
         print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo)")
-    all_nb = NOTEBOOK_ROOT / "eval_all_baselines.ipynb"
-    all_nb.write_text(json.dumps(build_eval_all_baselines(), indent=1) + "\n", encoding="utf-8")
-    print(f"wrote {all_nb}")
-    for name, builder in (
-        ("sft_all.ipynb", build_sft_all),
-        ("grpo_all.ipynb", build_grpo_all),
-    ):
-        path = NOTEBOOK_ROOT / name
-        path.write_text(json.dumps(builder(), indent=1) + "\n", encoding="utf-8")
-        print(f"wrote {path}")
     return 0
 
 

@@ -19,7 +19,7 @@ from .artifacts import (
     preload_env,
     uploader_from_args,
 )
-from .common import FAULT_NAMES
+from .common import WORKFLOW_NAMES
 from .grpo import configure_reward_backend, mechanical_reward
 from .hard_scenarios import HARD_SCENARIO_PROFILES, HARD_SCENARIO_SCHEMA_VERSION
 from .inference import generate_from_messages, load_local_policy
@@ -163,7 +163,7 @@ def select_calibration_rows(
     *,
     prompts_per_fault_profile: int = 2,
 ) -> list[dict[str, Any]]:
-    """Select a deterministic 6 x 3 stratified calibration slice."""
+    """Select a deterministic 52 x 3 stratified calibration slice."""
 
     if prompts_per_fault_profile < 1:
         raise ValueError("prompts_per_fault_profile must be positive")
@@ -171,11 +171,11 @@ def select_calibration_rows(
     for raw in rows:
         fault = str(raw.get("fault_name"))
         profile = str(raw.get("scenario_profile"))
-        if fault in FAULT_NAMES and profile in HARD_SCENARIO_PROFILES:
+        if fault in WORKFLOW_NAMES and profile in HARD_SCENARIO_PROFILES:
             cells[(fault, profile)].append(dict(raw))
     selected: list[dict[str, Any]] = []
     for profile in HARD_SCENARIO_PROFILES:
-        for fault in FAULT_NAMES:
+        for fault in WORKFLOW_NAMES:
             candidates = sorted(
                 cells[(fault, profile)],
                 key=lambda row: (int(row.get("variation_index", -1)), int(row.get("sample_seed", -1))),
@@ -235,10 +235,10 @@ def summarize_temperature(
         "mean_reward_ceiling": mean_reward <= max_mean_reward,
         "mixed_group_rate": mixed_group_rate >= min_mixed_group_rate,
         "mixed_fault_families": len(mixed_faults) >= min_mixed_fault_families,
-        "positive_reward_all_fault_families": positive_faults == set(FAULT_NAMES),
+        "positive_reward_all_fault_families": positive_faults == set(WORKFLOW_NAMES),
     }
     per_fault: dict[str, Any] = {}
-    for fault in FAULT_NAMES:
+    for fault in WORKFLOW_NAMES:
         items = [item for item in rollouts if item["fault_name"] == fault]
         per_fault[fault] = {
             "rollouts": len(items),

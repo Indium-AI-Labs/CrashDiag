@@ -204,8 +204,9 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
-            self.assertIn(3, payload["scenario_schema_versions"])
+            self.assertIn(5, payload["scenario_schema_versions"])
             self.assertTrue(payload["hard_scenario_batch"])
+            self.assertTrue(payload["workflow_scenario_batch"])
 
             with self.assertRaises(SandboxHTTPError) as missing:
                 HttpSandbox(base_url)
@@ -409,10 +410,11 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
             _, local_sandbox, _ = prepare_scenario("port_proxy_misconfig", seed)
             prompt = observation_messages(local_sandbox.observe())
             rewards = mechanical_reward(
-                ['{"action":"fix_port_config","parameters":{}}'],
+                ['{"actions":[{"action":"fix_port_config","parameters":{}}]}'],
                 fault_name=["port_proxy_misconfig"],
                 sample_seed=[seed],
                 prompts=[prompt],
+                subfault_count=[1],
             )
 
         self.assertEqual(rewards, [1.0])

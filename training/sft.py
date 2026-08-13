@@ -29,7 +29,7 @@ from .reporting import ReportBundle, generate_trainer_report
 from .qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
 
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_DATASET = Path("data/sft_train.jsonl")
 DEFAULT_EVAL_DATASET = Path("data/sft_eval.jsonl")
 DEFAULT_OUTPUT = Path("outputs/sft")

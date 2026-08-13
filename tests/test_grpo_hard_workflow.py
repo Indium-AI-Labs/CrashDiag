@@ -20,16 +20,16 @@ from training.calibrate_grpo import (
     select_calibration_rows,
     summarize_temperature,
 )
-from training.common import FAULT_NAMES
+from training.common import WORKFLOW_NAMES
 from training.evaluate_jsonl import summarize_results
 from training.grpo_gates import promotion_gate, smoke_gate
-from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_hard_records
+from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_v5_records
 from training.grpo import main as grpo_main
 
 
 class CalibrationTests(unittest.TestCase):
     def test_signed_rollout_replay_ignores_recorded_rewards(self) -> None:
-        rows = generate_hard_records(
+        rows = generate_v5_records(
             samples_per_fault=3, seed=17, start_variation=0, split="train"
         )
         selected = select_calibration_rows(rows, prompts_per_fault_profile=1)
@@ -151,22 +151,22 @@ class CalibrationTests(unittest.TestCase):
             self.assertTrue((root / "smoke/reports/smoke_gate.json").is_file())
 
     def test_calibration_slice_is_exactly_stratified(self) -> None:
-        rows = generate_hard_records(
+        rows = generate_v5_records(
             samples_per_fault=9, seed=12, start_variation=0, split="train"
         )
         selected = select_calibration_rows(rows, prompts_per_fault_profile=2)
-        self.assertEqual(len(selected), 108)
+        self.assertEqual(len(selected), 312)
         cells = {(row["fault_name"], row["scenario_profile"]) for row in selected}
-        self.assertEqual(len(cells), len(FAULT_NAMES) * len(HARD_SCENARIO_PROFILES))
+        self.assertEqual(len(cells), len(WORKFLOW_NAMES) * len(HARD_SCENARIO_PROFILES))
 
     def test_variance_gate_requires_mixed_groups_across_four_faults(self) -> None:
         rollouts = []
         prompt_index = 0
-        for fault_index, fault in enumerate(FAULT_NAMES):
+        for fault_index, fault in enumerate(WORKFLOW_NAMES):
             for _ in range(2):
                 for generation in range(8):
-                    reward = 1.0 if fault_index < 10 and generation < 4 else 0.0
-                    if fault_index >= 10:
+                    reward = 1.0 if fault_index < 26 and generation < 4 else 0.0
+                    if fault_index >= 26:
                         reward = 1.0
                     rollouts.append(
                         {
@@ -180,20 +180,16 @@ class CalibrationTests(unittest.TestCase):
                 prompt_index += 1
         result = summarize_temperature(rollouts, expected_group_size=8)
         self.assertTrue(result["passed"])
-        self.assertEqual(len(result["mixed_fault_families"]), 10)
-        self.assertEqual(
-            set(result["positive_reward_fault_families"]),
-            set(FAULT_NAMES),
-        )
+        self.assertEqual(len(result["mixed_fault_families"]), 26)
 
     def test_variance_gate_rejects_a_fault_family_with_no_positive_rollout(self) -> None:
         rollouts = []
         prompt_index = 0
-        for fault_index, fault in enumerate(FAULT_NAMES):
+        for fault_index, fault in enumerate(WORKFLOW_NAMES):
             for _ in range(2):
                 for generation in range(8):
                     reward = 1.0 if generation < 4 else 0.0
-                    if fault_index == len(FAULT_NAMES) - 1:
+                    if fault_index == len(WORKFLOW_NAMES) - 1:
                         reward = 0.0
                     rollouts.append(
                         {
@@ -212,7 +208,7 @@ class CalibrationTests(unittest.TestCase):
         self.assertFalse(result["gates"]["positive_reward_all_fault_families"])
 
     def test_calibration_scores_each_generation_concurrently(self) -> None:
-        rows = generate_hard_records(
+        rows = generate_v5_records(
             samples_per_fault=6, seed=31, start_variation=0, split="train"
         )
         lock = threading.Lock()
@@ -247,7 +243,7 @@ class CalibrationTests(unittest.TestCase):
             )
         self.assertTrue(report["passed"])
         self.assertEqual(maximum_active, 2)
-        self.assertTrue(any("54/54 prompt groups" in message for message in messages))
+        self.assertTrue(any("156/156 prompt groups" in message for message in messages))
 
 
 class EvaluationAndGateTests(unittest.TestCase):
@@ -295,6 +291,8 @@ class EvaluationAndGateTests(unittest.TestCase):
             self.assertTrue(smoke_gate(state, adapter, parent)["passed"])
 
             def report(path: Path, total: int, rate: float, per_fault: float) -> None:
+                from crashdiag.faults.workflows import WORKFLOWS as _WORKFLOWS
+
                 path.write_text(
                     json.dumps(
                         {
@@ -304,7 +302,7 @@ class EvaluationAndGateTests(unittest.TestCase):
                                 "backend_error_rate": 0.0,
                             },
                             "per_fault": {
-                                name: {"success_rate": per_fault} for name in FAULT_NAMES
+                                name: {"success_rate": per_fault} for name in _WORKFLOWS
                             },
                         }
                     )
@@ -312,10 +310,10 @@ class EvaluationAndGateTests(unittest.TestCase):
 
             hard = root / "hard.json"
             regression = root / "regression.json"
-            report(hard, 144, 0.8, 0.6)
-            report(regression, 144, 0.98, 0.98)
+            report(hard, 104000, 0.8, 0.6)
+            report(regression, 104000, 0.98, 0.98)
             self.assertTrue(promotion_gate(hard, regression)["passed"])
-            report(hard, 144, 0.8, 0.4)
+            report(hard, 104000, 0.8, 0.4)
             self.assertFalse(promotion_gate(hard, regression)["passed"])
 
 

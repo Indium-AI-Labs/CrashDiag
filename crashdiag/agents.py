@@ -28,13 +28,28 @@ ACTION_SPACE = (
     "reset_database_pool",
     "restore_dns_configuration",
     "restore_rate_limit_configuration",
+    "restart_worker",
+    "redeploy_container",
+    "clear_temp_files",
+    "rotate_logs",
+    "restore_load_balancer_config",
+    "restore_network_config",
+    "sync_replica",
+    "restore_database_config",
+    "flush_dead_letter_queue",
+    "restore_cache_config",
+    "reset_circuit_breaker",
+    "restore_cron_schedule",
+    "rebuild_index",
+    "restore_tls_config",
     "wait_and_observe",
 )
 """The complete set of actions a blue agent may emit."""
 
 _ALLOWED_ACTIONS = frozenset(ACTION_SPACE)
+_MAX_WORKFLOW_ACTIONS = 8
 DEFAULT_SYSTEM_PROMPT = """You diagnose a failing application from system observations.
-Choose exactly one action from this list:
+Choose an ordered list of actions from this list:
 - restart_app
 - rollback_env_var
 - fix_dependency
@@ -47,11 +62,26 @@ Choose exactly one action from this list:
 - reset_database_pool
 - restore_dns_configuration
 - restore_rate_limit_configuration
+- restart_worker
+- redeploy_container
+- clear_temp_files
+- rotate_logs
+- restore_load_balancer_config
+- restore_network_config
+- sync_replica
+- restore_database_config
+- flush_dead_letter_queue
+- restore_cache_config
+- reset_circuit_breaker
+- restore_cron_schedule
+- rebuild_index
+- restore_tls_config
 - wait_and_observe
 
 Reply with one JSON object only, using this schema:
-{"action": "<action name>", "parameters": {}}
-The parameters value must be a JSON object. Do not use markdown or prose.
+{"actions": [{"action": "<action name>", "parameters": {}}]}
+The parameters value must be a JSON object and must be exactly {} for every action.
+Do not use markdown or prose.
 """
 
 
@@ -146,6 +176,74 @@ def parse_action(content: Any) -> dict[str, Any]:
         if validated is not None:
             return validated
     return _safe_wait_action()
+
+
+def _safe_wait_workflow() -> dict[str, Any]:
+    """Return a fresh safe fallback workflow."""
+
+    return {"actions": [_safe_wait_action()]}
+
+
+def _validated_workflow(value: Any) -> dict[str, Any] | None:
+    """Validate a decoded workflow: an ordered list of bounded actions."""
+
+    if not isinstance(value, Mapping):
+        return None
+    raw_actions = value.get("actions")
+    if not isinstance(raw_actions, list) or not raw_actions:
+        return None
+    if len(raw_actions) > _MAX_WORKFLOW_ACTIONS:
+        return None
+    actions: list[dict[str, Any]] = []
+    for raw in raw_actions:
+        validated = _validated_action(raw)
+        if validated is None:
+            return None
+        actions.append(validated)
+    result: dict[str, Any] = {"actions": actions}
+    reason = value.get("reason")
+    if isinstance(reason, str):
+        result["reason"] = reason
+    return result
+
+
+def parse_workflow(content: Any) -> dict[str, Any]:
+    """Parse a multi-action workflow, returning a safe wait workflow on failure.
+
+    Accepts the same JSON and Markdown-fence forms as :func:`parse_action`, but
+    requires a top-level object with an ``actions`` array of 1..8 bounded actions.
+    """
+
+    if isinstance(content, Mapping):
+        return _validated_workflow(content) or _safe_wait_workflow()
+    if not isinstance(content, str) or not content.strip():
+        return _safe_wait_workflow()
+
+    candidates: list[Any] = []
+    stripped = content.strip()
+    try:
+        decoded = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+        pass
+    else:
+        return _validated_workflow(decoded) or _safe_wait_workflow()
+
+    fenced_match = re.fullmatch(
+        r"```(?:json)?\s*(.*?)\s*```",
+        stripped,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if fenced_match is not None:
+        try:
+            candidates.append(json.loads(fenced_match.group(1)))
+        except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+            pass
+
+    for candidate in candidates:
+        validated = _validated_workflow(candidate)
+        if validated is not None:
+            return validated
+    return _safe_wait_workflow()
 
 
 class BlueAgent:
@@ -304,4 +402,4 @@ class BlueAgent:
         return self.choose_action(observation, history)
 
 
-__all__ = ["ACTION_SPACE", "BlueAgent", "parse_action"]
+__all__ = ["ACTION_SPACE", "BlueAgent", "parse_action", "parse_workflow"]

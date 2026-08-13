@@ -1,4 +1,4 @@
-"""Tests for the answer-free schema-v3 GRPO dataset handoff."""
+"""Tests for the answer-free v5 multi-action GRPO dataset handoff."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from crashdiag.faults.workflows import WORKFLOWS
 from training.artifacts import ArtifactError
-from training.common import FAULT_NAMES
-from training.generate_grpo_hard import generate_hard_datasets, read_parent_reference
+from training.generate_grpo_hard import read_parent_reference
 from training.hard_scenarios import HARD_SCENARIO_PROFILES
 
 
@@ -20,40 +20,40 @@ def _sha(path: Path) -> str:
 
 
 class HardDatasetTests(unittest.TestCase):
-    def test_default_shape_is_432_train_and_144_eval(self) -> None:
+    def test_default_shape_is_1m_train_and_104k_eval(self) -> None:
+        self.assertEqual(len(WORKFLOWS), 52)
+        from training.generate_dataset import generate_datasets
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            train = root / "train.jsonl"
-            evaluation = root / "eval.jsonl"
+            train = root / "sft_train.jsonl"
+            evaluation = root / "sft_eval.jsonl"
+            grpo_train = root / "grpo_train.jsonl"
+            grpo_eval = root / "grpo_eval.jsonl"
             summary_path = root / "summary.json"
-            summary = generate_hard_datasets(train, evaluation, summary_path)
-
-            self.assertEqual(summary["train"]["rows"], 432)
-            self.assertEqual(summary["eval"]["rows"], 144)
-            self.assertEqual(summary["curriculum_version"], 4)
-            self.assertEqual(summary["action_contract"], "parameter_free_repairs")
+            counts = generate_datasets(
+                train,
+                evaluation,
+                grpo_train,
+                grpo_eval,
+                summary_path,
+                train_samples_per_fault=1,
+                eval_samples_per_fault=1,
+                seed=19,
+            )
+            self.assertEqual(counts, {"train": 52, "eval": 52})
             train_rows = [json.loads(line) for line in train.read_text().splitlines()]
-            eval_rows = [json.loads(line) for line in evaluation.read_text().splitlines()]
             self.assertEqual(
                 Counter(row["fault_name"] for row in train_rows),
-                Counter({name: 24 for name in FAULT_NAMES}),
-            )
-            self.assertEqual(
-                Counter(row["fault_name"] for row in eval_rows),
-                Counter({name: 8 for name in FAULT_NAMES}),
-            )
-            self.assertEqual(
-                {row["scenario_profile"] for row in train_rows},
-                set(HARD_SCENARIO_PROFILES),
+                Counter({name: 1 for name in WORKFLOWS}),
             )
             self.assertTrue(
                 {row["sample_seed"] for row in train_rows}.isdisjoint(
-                    {row["sample_seed"] for row in eval_rows}
+                    {row["sample_seed"] for row in [json.loads(line) for line in evaluation.read_text().splitlines()]}
                 )
             )
-            for row in train_rows + eval_rows:
-                self.assertNotIn("completion", row)
-                self.assertNotIn("answer", row)
+            for row in train_rows:
+                self.assertIn("actions", row["completion"][0]["content"])
                 self.assertNotIn("expert_action", row)
 
     def test_parent_reference_uses_signed_manifest_weight_identity(self) -> None:
@@ -61,7 +61,7 @@ class HardDatasetTests(unittest.TestCase):
             root = Path(directory)
             config = root / "adapter_config.json"
             config.write_text(
-                json.dumps({"base_model_name_or_path": "Qwen/Qwen2.5-0.5B-Instruct"}),
+                json.dumps({"base_model_name_or_path": "Qwen/Qwen2.5-3B-Instruct"}),
                 encoding="utf-8",
             )
             run_id = "parent-sft"

@@ -13,7 +13,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from crashdiag.agents import ACTION_SPACE, parse_action
+from crashdiag.agents import ACTION_SPACE, parse_workflow
+from crashdiag.faults.workflows import WORKFLOWS
 from training.common import (
     FAULT_NAMES,
     SYSTEM_PROMPT,
@@ -23,7 +24,7 @@ from training.common import (
 )
 from training.artifacts import ArtifactError
 from training.generate_dataset import generate_datasets, generate_records, main
-from training.generate_dataset import expert_action, prepare_scenario
+from training.generate_dataset import expert_workflow, prepare_scenario
 from training.sft import _compatible_config_kwargs, build_parser
 
 
@@ -66,12 +67,12 @@ class TrainingCommonTests(unittest.TestCase):
 class DatasetGenerationTests(unittest.TestCase):
     def test_records_are_stratified_validated_and_answer_free(self) -> None:
         sft_rows, grpo_rows = generate_records(samples_per_fault=2, seed=73)
-        expected_count = len(FAULT_NAMES) * 2
+        expected_count = len(WORKFLOWS) * 2
         self.assertEqual(len(sft_rows), expected_count)
         self.assertEqual(len(grpo_rows), expected_count)
         self.assertEqual(
             Counter(row["fault_name"] for row in sft_rows),
-            Counter({name: 2 for name in FAULT_NAMES}),
+            Counter({name: 2 for name in WORKFLOWS}),
         )
 
         for sft, grpo in zip(sft_rows, grpo_rows, strict=True):
@@ -99,33 +100,39 @@ class DatasetGenerationTests(unittest.TestCase):
                 {
                     "fault_name",
                     "difficulty",
+                    "subfault_count",
                     "sample_seed",
                     "variation_index",
+                    "scenario_schema_version",
+                    "curriculum_version",
+                    "scenario_profile",
                     "prompt",
                     "metadata",
                 },
             )
-            target = parse_action(completion_text(sft["completion"]))
-            self.assertIn(target["action"], ACTION_SPACE)
-            self.assertNotEqual(target["action"], "wait_and_observe")
-            self.assertEqual(target["parameters"], {})
+            target = parse_workflow(completion_text(sft["completion"]))
+            self.assertTrue(target["actions"])
+            for entry in target["actions"]:
+                self.assertIn(entry["action"], ACTION_SPACE)
+                self.assertNotEqual(entry["action"], "wait_and_observe")
+                self.assertEqual(entry["parameters"], {})
 
-    def test_default_v1_scenarios_are_hardened_and_replay_with_parameter_free_repairs(self) -> None:
-        for fault_name in FAULT_NAMES:
-            fault, sandbox, _ = prepare_scenario(fault_name, 1729)
+    def test_default_scenarios_are_hardened_and_replay_with_parameter_free_repairs(self) -> None:
+        for fault_name in WORKFLOWS:
+            workflow, sandbox, _ = prepare_scenario(fault_name, 1729)
             observation = sandbox.observe()
             self.assertFalse(observation["health"]["healthy"])
-            target = expert_action(fault_name, sandbox, None)
-            self.assertEqual(target["parameters"], {})
-            sandbox.execute_action(target["action"], target["parameters"])
-            self.assertTrue(fault.is_resolved(sandbox))
+            target = expert_workflow(fault_name)
+            for action in target["actions"]:
+                sandbox.execute_action(action["action"], action["parameters"])
+            self.assertTrue(workflow.is_resolved(sandbox))
             self.assertTrue(sandbox.health_check()["healthy"])
 
     def test_generation_is_byte_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            first_paths = [root / f"first-{name}.jsonl" for name in range(4)]
-            second_paths = [root / f"second-{name}.jsonl" for name in range(4)]
+            first_paths = [root / f"first-{name}.jsonl" for name in range(5)]
+            second_paths = [root / f"second-{name}.jsonl" for name in range(5)]
             counts = generate_datasets(
                 *first_paths,
                 train_samples_per_fault=1,
@@ -138,7 +145,7 @@ class DatasetGenerationTests(unittest.TestCase):
                 eval_samples_per_fault=1,
                 seed=19,
             )
-            self.assertEqual(counts, {"train": len(FAULT_NAMES), "eval": len(FAULT_NAMES)})
+            self.assertEqual(counts, {"train": len(WORKFLOWS), "eval": len(WORKFLOWS)})
             for first, second in zip(first_paths, second_paths, strict=True):
                 self.assertEqual(first.read_bytes(), second.read_bytes())
             for grpo_path in (first_paths[2], first_paths[3]):
@@ -165,6 +172,7 @@ class DatasetGenerationTests(unittest.TestCase):
                     target,
                     Path(directory) / "grpo-train.jsonl",
                     Path(directory) / "grpo-eval.jsonl",
+                    Path(directory) / "summary.json",
                     train_samples_per_fault=1,
                     eval_samples_per_fault=1,
                 )
@@ -198,7 +206,7 @@ class DatasetGenerationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            outputs = [root / f"dataset-{index}.jsonl" for index in range(4)]
+            outputs = [root / f"dataset-{index}.jsonl" for index in range(5)]
             missing_env = root / "missing.env"
             stdout = io.StringIO()
             fake = FakeUploader(stdout)
@@ -219,6 +227,8 @@ class DatasetGenerationTests(unittest.TestCase):
                 str(outputs[2]),
                 "--grpo-eval-output",
                 str(outputs[3]),
+                "--summary-output",
+                str(outputs[4]),
                 "--train-samples-per-fault",
                 "1",
                 "--eval-samples-per-fault",
@@ -259,8 +269,8 @@ class DatasetGenerationTests(unittest.TestCase):
             self.assertEqual(fake.calls[1][2]["seed"], 19)
             self.assertEqual(fake.calls[2][1], tuple(outputs))
             self.assertEqual(fake.calls[2][2], "datasets")
-            self.assertEqual(fake.calls[2][3]["train_rows"], len(FAULT_NAMES))
-            self.assertEqual(fake.calls[2][3]["eval_rows"], len(FAULT_NAMES))
+            self.assertEqual(fake.calls[2][3]["train_rows"], len(WORKFLOWS))
+            self.assertEqual(fake.calls[2][3]["eval_rows"], len(WORKFLOWS))
             self.assertTrue(fake.calls[2][3]["mechanically_validated"])
             self.assertFalse(fake.calls[2][3]["grpo_targets_included"])
             self.assertTrue(all(path.is_file() for path in outputs))

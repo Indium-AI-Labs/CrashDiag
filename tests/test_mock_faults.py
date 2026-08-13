@@ -11,6 +11,7 @@ from crashdiag.faults.modules import (
     OOMKill,
     PortProxyMisconfig,
 )
+from crashdiag.faults.workflows import WORKFLOWS
 from crashdiag.sandbox_apps.mock import MockSandbox
 
 
@@ -51,7 +52,8 @@ class MockFaultTests(unittest.TestCase):
     )
 
     def test_all_faults_inject_and_resolve_mechanically(self) -> None:
-        self.assertEqual(len(ALL_FAULTS), 18)
+        self.assertEqual(len(ALL_FAULTS), 35)
+        self.assertEqual(len(WORKFLOWS), 52)
 
         for fault_type, recovery_action in self.CASES:
             with self.subTest(fault=fault_type.__name__):

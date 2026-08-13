@@ -19,8 +19,9 @@ class ScriptedBlueAgent:
     ) -> dict[str, Any]:
         del observation, history
         return {
-            "action": "rollback_env_var",
-            "parameters": {"name": "APP_ENV"},
+            "actions": [
+                {"action": "rollback_env_var", "parameters": {"name": "APP_ENV"}}
+            ]
         }
 
 
