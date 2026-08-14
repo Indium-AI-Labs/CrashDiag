@@ -397,6 +397,50 @@ print(f"eval_file={{EVAL_FILE}}")
     )
 
 
+def build_eval_base(model_slug: str, base_model: str) -> dict:
+    return _nb(
+        f"{model_slug} base model evaluation",
+        [
+            _setup_cell(
+                "env.txt",
+                kaggle=True,
+                stage_aliases='''    "CRASHDIAG_BASE_EVAL_RUN_ID": "CRASHDIAG_BASE_EVAL_RUN_ID",
+    "BASE_EVAL_RUN_ID": "CRASHDIAG_BASE_EVAL_RUN_ID",
+''',
+            ),
+            _model_cell(
+                model_slug,
+                base_model,
+                extra='''BASE_EVAL_RUN_ID = os.environ.get("CRASHDIAG_BASE_EVAL_RUN_ID") or ist_run_id("base-eval")
+print(f"base_eval_run_id={BASE_EVAL_RUN_ID}")
+''',
+            ),
+            f'''from pathlib import Path
+from training.artifacts import ArtifactConfig, ArtifactUploader
+
+{_hard_curriculum_cell()}
+DATASET_DIR = Path("artifacts/datasets")
+ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
+assert (DATASET_DIR / EVAL_FILE).is_file(), f"dataset stage missing {{EVAL_FILE}}; check CRASHDIAG_DATASET_RUN_ID={{DATASET_RUN_ID}}"
+print(f"curriculum={{CURRICULUM}}")
+print(f"eval_file={{EVAL_FILE}}")
+''',
+            f'''from training.evaluate_jsonl import main as evaluate_main
+
+exit_code = evaluate_main([
+    "--model", BASE_MODEL, "--dataset", str(DATASET_DIR / EVAL_FILE),
+    "--output-dir", "outputs/base-eval", "--load-in-4bit", "--precision", "bf16",
+    "--max-new-tokens", "64",
+    "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+    "--artifact-bucket", BUCKET_ID, "--run-id", BASE_EVAL_RUN_ID, "--artifact-stage", "base-eval",
+])
+if exit_code: raise RuntimeError(f"Base model evaluation failed: {{exit_code}}")
+''',
+            _svg_cell("base-eval", "BASE_EVAL_RUN_ID"),
+        ],
+    )
+
+
 # --- all-models training notebooks ------------------------------------------
 #
 # Both notebooks share ONE run ID for every model.  Each model's training
@@ -742,12 +786,13 @@ def main() -> int:
             "eval_sft.ipynb": build_eval_sft(slug, base),
             "grpo.ipynb": build_grpo(slug, base),
             "eval_grpo.ipynb": build_eval_grpo(slug, base),
+            "eval_base.ipynb": build_eval_base(slug, base),
         }
         for name, nb in specs.items():
             (folder / name).write_text(
                 json.dumps(nb, indent=1) + "\n", encoding="utf-8"
             )
-        print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo)")
+        print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo, eval_base)")
     return 0
 
 

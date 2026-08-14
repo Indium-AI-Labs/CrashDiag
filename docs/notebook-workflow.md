@@ -12,6 +12,7 @@ Only `notebooks/qwen2.5_3b/` remains:
 - `eval_sft.ipynb` — held-out SFT evaluation.
 - `grpo.ipynb` — GRPO smoke then full, followed by eval.
 - `eval_grpo.ipynb` — held-out GRPO evaluation.
+- `eval_base.ipynb` — base-model evaluation (few-shot, no checkpoint download).
 
 Regenerate them after any template change:
 
@@ -54,9 +55,10 @@ Optional:
 
 ## Kaggle secrets
 
-All notebooks (`sft.ipynb`, `eval_sft.ipynb`, `grpo.ipynb`, `eval_grpo.ipynb`) load
-secrets via `kaggle_secrets.UserSecretsClient` when available and do not hard-fail when
-the local `env.txt` / `.env` is absent, so the same notebook runs unchanged on Kaggle.
+All notebooks (`sft.ipynb`, `eval_sft.ipynb`, `grpo.ipynb`, `eval_grpo.ipynb`,
+`eval_base.ipynb`) load secrets via `kaggle_secrets.UserSecretsClient` when available
+and do not hard-fail when the local `env.txt` / `.env` is absent, so the same notebook
+runs unchanged on Kaggle.
 
 ## Evaluation behavior
 

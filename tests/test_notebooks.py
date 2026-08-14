@@ -19,6 +19,7 @@ NOTEBOOK_NAMES = {
     "eval_sft.ipynb",
     "grpo.ipynb",
     "eval_grpo.ipynb",
+    "eval_base.ipynb",
 }
 TOP_LEVEL: set[str] = set()
 
@@ -60,7 +61,7 @@ class ModelNotebookTests(unittest.TestCase):
                 self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
                 self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
                 self.assertIn("CRASHDIAG_ENV_FILE", source)
-                if name in {"eval_sft.ipynb", "grpo.ipynb", "eval_grpo.ipynb"}:
+                if name in {"eval_sft.ipynb", "grpo.ipynb", "eval_grpo.ipynb", "eval_base.ipynb"}:
                     self.assertIn("CRASHDIAG_CURRICULUM", source)
                 self.assertIn("display(SVG", source)
                 self.assertIn('"reports"', source)
