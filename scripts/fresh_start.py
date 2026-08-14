@@ -44,14 +44,14 @@ def main() -> int:
     parser.add_argument(
         "--train-samples-per-fault",
         type=int,
-        default=20000,
-        help="v5 training variations per workflow (default 20000)",
+        default=5000,
+        help="v5 training variations per workflow (default 5000)",
     )
     parser.add_argument(
         "--eval-samples-per-fault",
         type=int,
-        default=2000,
-        help="v5 evaluation variations per workflow (default 2000)",
+        default=25,
+        help="v5 evaluation variations per workflow (default 25)",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-id", default=None, help="explicit run ID")

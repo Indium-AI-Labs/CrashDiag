@@ -22,7 +22,9 @@ python scripts/generate_notebooks.py
 
 ## Env variables
 
-Use `.env.example.sft` and `.env.example.grpo` as the copy-paste templates.
+All notebooks read `env.txt` from their launch directory (override with
+`CRASHDIAG_ENV_FILE`). Use `.env.example.sft` and `.env.example.grpo` as the
+copy-paste templates and save the result as `env.txt`.
 
 Required (SFT):
 
@@ -57,8 +59,8 @@ Optional:
 
 All notebooks (`sft.ipynb`, `eval_sft.ipynb`, `grpo.ipynb`, `eval_grpo.ipynb`,
 `eval_base.ipynb`) load secrets via `kaggle_secrets.UserSecretsClient` when available
-and do not hard-fail when the local `env.txt` / `.env` is absent, so the same notebook
-runs unchanged on Kaggle.
+and do not hard-fail when the local `env.txt` is absent, so the same notebook runs
+unchanged on Kaggle.
 
 ## Evaluation behavior
 

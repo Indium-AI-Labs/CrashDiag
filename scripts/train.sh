@@ -5,8 +5,8 @@ set -euo pipefail
 # from the repository-root .env; the shell never sources or prints that file.
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-3B-Instruct}"
 NUM_PROCESSES="${NUM_PROCESSES:-1}"
-TRAIN_SAMPLES_PER_FAULT="${TRAIN_SAMPLES_PER_FAULT:-20000}"
-EVAL_SAMPLES_PER_FAULT="${EVAL_SAMPLES_PER_FAULT:-2000}"
+TRAIN_SAMPLES_PER_FAULT="${TRAIN_SAMPLES_PER_FAULT:-5000}"
+EVAL_SAMPLES_PER_FAULT="${EVAL_SAMPLES_PER_FAULT:-25}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || printf 'nogit')"
 RANDOM_SUFFIX="$(python -c 'import secrets; print(secrets.token_hex(3))')"
 export CRASHDIAG_RUN_ID="${CRASHDIAG_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${GIT_SHA}-${RANDOM_SUFFIX}}"

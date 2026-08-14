@@ -89,8 +89,8 @@ GRPO rows are answer-free and carry no `completion`.
 
 | split | rows per task | total rows |
 |---|---|---|
-| train | 20,000 | 1,040,000 |
-| eval | 2,000 | 104,000 |
+| train | 5,000 | 260,000 |
+| eval | 25 | 1,300 |
 
 Train and eval variations are disjoint by construction (eval `variation_index` starts
 at the train count).

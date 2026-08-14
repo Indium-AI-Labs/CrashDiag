@@ -141,7 +141,11 @@ def completion_text(value: Any) -> str:
     return ""
 
 
-def observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]:
+def observation_messages(
+    observation: Mapping[str, Any],
+    *,
+    workflow_name: str | None = None,
+) -> list[dict[str, str]]:
     """Build the redacted operational prompt used by the v5 curriculum."""
 
     # Keep the prompt projection beside the legacy common helpers while avoiding
@@ -149,7 +153,7 @@ def observation_messages(observation: Mapping[str, Any]) -> list[dict[str, str]]
     from .hard_scenarios import hard_observation_workflow
 
     content = json.dumps(
-        {"observation": hard_observation_workflow(observation)},
+        {"observation": hard_observation_workflow(observation, workflow_name=workflow_name)},
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),

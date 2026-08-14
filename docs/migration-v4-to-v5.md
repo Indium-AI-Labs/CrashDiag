@@ -9,8 +9,8 @@
 | Reward | sparse 0/1 final resolution | partial credit `resolved_subfaults / total_subfaults` |
 | Model | 5-model Qwen2.5 sweep | single `Qwen/Qwen2.5-3B-Instruct` |
 | Actions | 13 | 27 |
-| Train size | 432 | 1,040,000 |
-| Eval size | 144 | 104,000 |
+| Train size | 432 | 260,000 |
+| Eval size | 144 | 1,300 |
 | Curriculum version | 4 | 5 |
 | Dataset files | separate `grpo_hard_*` | consolidated SFT + GRPO + summary |
 
@@ -24,7 +24,8 @@
   compromising the "no LLM grader" property.
 - **Single 3B model** follows the "smallest model that reaches target accuracy"
   preference and removes the multi-model sweep complexity.
-- **1M rows** gives the larger curriculum enough coverage per task.
+- **~256k train rows** give the larger curriculum enough coverage per task while
+  keeping dataset generation and training iterations manageable.
 
 ## What was removed
 

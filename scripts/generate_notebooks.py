@@ -301,7 +301,7 @@ def build_grpo(model_slug: str, base_model: str) -> dict:
         f"{model_slug} GRPO",
         [
             _setup_cell(
-                ".env",
+                "env.txt",
                 kaggle=True,
                 stage_aliases='''    "CRASHDIAG_SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
     "SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
@@ -357,7 +357,7 @@ def build_eval_grpo(model_slug: str, base_model: str) -> dict:
         f"{model_slug} GRPO evaluation",
         [
             _setup_cell(
-                ".env",
+                "env.txt",
                 kaggle=True,
                 stage_aliases='''    "CRASHDIAG_GRPO_RUN_ID": "CRASHDIAG_GRPO_RUN_ID",
     "GRPO_RUN_ID": "CRASHDIAG_GRPO_RUN_ID",
@@ -552,7 +552,7 @@ def build_grpo_all() -> dict:
         "Qwen2.5 GRPO all models (one run ID)",
         [
             _setup_cell(
-                ".env",
+                "env.txt",
                 kaggle=True,
                 stage_aliases='''    "CRASHDIAG_SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
     "SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
@@ -635,7 +635,7 @@ def build_eval_all_baselines() -> dict:
         f'    "{slug}": "{base}",' for slug, base in MODELS.items()
     )
     cells = [
-        _setup_cell(".env", kaggle=True),
+        _setup_cell("env.txt", kaggle=True),
         f'''from datetime import datetime
 from zoneinfo import ZoneInfo
 import os

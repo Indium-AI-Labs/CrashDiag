@@ -310,10 +310,10 @@ class EvaluationAndGateTests(unittest.TestCase):
 
             hard = root / "hard.json"
             regression = root / "regression.json"
-            report(hard, 104000, 0.8, 0.6)
-            report(regression, 104000, 0.98, 0.98)
+            report(hard, 1300, 0.8, 0.6)
+            report(regression, 1300, 0.98, 0.98)
             self.assertTrue(promotion_gate(hard, regression)["passed"])
-            report(hard, 104000, 0.8, 0.4)
+            report(hard, 1300, 0.8, 0.4)
             self.assertFalse(promotion_gate(hard, regression)["passed"])
 
 

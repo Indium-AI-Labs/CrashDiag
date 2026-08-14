@@ -50,6 +50,8 @@ from .hard_scenarios import (
 
 
 SCHEMA_VERSION = 5
+DEFAULT_TRAIN_SAMPLES_PER_FAULT = 5000
+DEFAULT_EVAL_SAMPLES_PER_FAULT = 25
 DEFAULT_DATASET_BUCKET = "devaanshpa/CrashDiag"
 DEFAULT_SFT_TRAIN_OUTPUT = Path("data/sft_train.jsonl")
 DEFAULT_SFT_EVAL_OUTPUT = Path("data/sft_eval.jsonl")
@@ -213,7 +215,7 @@ def build_validated_sample(
         "scenario_profile": HARD_SCENARIO_PROFILES[
             current_seed % len(HARD_SCENARIO_PROFILES)
         ],
-        "prompt": observation_messages(observation),
+        "prompt": observation_messages(observation, workflow_name=workflow.name),
         "metadata": {
             "schema_version": SCHEMA_VERSION,
             "curriculum_version": SCHEMA_VERSION,
@@ -254,7 +256,7 @@ def build_validated_sample(
 
 def generate_records(
     *,
-    samples_per_fault: int = 20000,
+    samples_per_fault: int = DEFAULT_TRAIN_SAMPLES_PER_FAULT,
     seed: int = 42,
     start_variation: int = 0,
     split: str = "train",
@@ -310,8 +312,8 @@ def generate_datasets(
     grpo_eval_output: str | Path = DEFAULT_GRPO_EVAL_OUTPUT,
     summary_output: str | Path = DEFAULT_SUMMARY_OUTPUT,
     *,
-    train_samples_per_fault: int = 20000,
-    eval_samples_per_fault: int = 2000,
+    train_samples_per_fault: int = DEFAULT_TRAIN_SAMPLES_PER_FAULT,
+    eval_samples_per_fault: int = DEFAULT_EVAL_SAMPLES_PER_FAULT,
     seed: int = 42,
 ) -> dict[str, int]:
     """Validate and write four stratified datasets plus a summary."""
@@ -410,14 +412,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--train-samples-per-fault",
         type=int,
-        default=20000,
-        help="training variations for each workflow (default: 20000)",
+        default=DEFAULT_TRAIN_SAMPLES_PER_FAULT,
+        help="training variations for each workflow (default: 5000)",
     )
     parser.add_argument(
         "--eval-samples-per-fault",
         type=int,
-        default=2000,
-        help="evaluation variations for each workflow (default: 2000)",
+        default=DEFAULT_EVAL_SAMPLES_PER_FAULT,
+        help="evaluation variations for each workflow (default: 25)",
     )
     parser.add_argument("--seed", type=int, default=42)
     add_artifact_arguments(parser)

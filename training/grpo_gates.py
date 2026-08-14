@@ -115,6 +115,7 @@ def promotion_gate(
     minimum_hard_success: float = 0.70,
     minimum_hard_fault_success: float = 0.50,
     minimum_regression_success: float = 0.95,
+    expected_episodes: int = 1300,
 ) -> dict[str, Any]:
     """Require hard generalization without losing the schema-v1 baseline."""
 
@@ -135,11 +136,11 @@ def promotion_gate(
         if isinstance(value, Mapping)
     ]
     gates = {
-        "hard_complete": int(hard_summary.get("total_episodes", 0)) == 104000,
+        "hard_complete": int(hard_summary.get("total_episodes", 0)) == expected_episodes,
         "hard_success": hard_rate >= minimum_hard_success,
         "hard_per_fault": len(per_fault_rates) == 52
         and min(per_fault_rates, default=0.0) >= minimum_hard_fault_success,
-        "regression_complete": int(regression_summary.get("total_episodes", 0)) >= 104000,
+        "regression_complete": int(regression_summary.get("total_episodes", 0)) >= expected_episodes,
         "regression_success": regression_rate >= minimum_regression_success,
         "backend_error_rate_zero": hard_backend == 0.0 and regression_backend == 0.0,
     }

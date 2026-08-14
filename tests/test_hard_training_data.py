@@ -20,7 +20,7 @@ def _sha(path: Path) -> str:
 
 
 class HardDatasetTests(unittest.TestCase):
-    def test_default_shape_is_1m_train_and_104k_eval(self) -> None:
+    def test_dataset_shape_is_balanced_and_disjoint(self) -> None:
         self.assertEqual(len(WORKFLOWS), 52)
         from training.generate_dataset import generate_datasets
 

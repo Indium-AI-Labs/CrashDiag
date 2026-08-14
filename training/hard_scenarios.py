@@ -144,6 +144,34 @@ _FAULT_SIGNAL_BIAS: dict[str, tuple[str, ...]] = {
     "rate_limit_misconfiguration": ("sensor-16", "sensor-01", "sensor-08"),
 }
 
+
+def _workflow_signature(name: str) -> str:
+    """Return a stable, workflow-specific opaque signature.
+
+    Keying the signature to the workflow name (rather than a single
+    reverse-engineered sub-fault) keeps multi-fault workflows distinct and
+    deterministic, so the same task always presents the same identifier while
+    signals and recent events still vary per variation.
+    """
+
+    digest = hashlib.sha256(
+        f"crashdiag:v5:workflow-signature:{name}".encode("utf-8")
+    ).hexdigest()
+    return f"sig-{digest[:8]}"
+
+
+def _workflow_signal_bias(name: str) -> tuple[str, ...]:
+    """Return a stable three-sensor bias for one workflow."""
+
+    digest = hashlib.sha256(
+        f"crashdiag:v5:workflow-signals:{name}".encode("utf-8")
+    ).digest()
+    rng = random.Random(int.from_bytes(digest[:8], "big"))
+    pool = list(_SENSOR_POOL)
+    rng.shuffle(pool)
+    return tuple(sorted(pool[:3]))
+
+
 _ACTION_BY_FAULT = {
     "oom_kill": "restart_app", "bad_env_var": "rollback_env_var",
     "broken_db_connection": "rollback_env_var", "dependency_mismatch": "fix_dependency",
@@ -450,8 +478,13 @@ def prepare_hard_scenario(
     return fault, target, rng
 
 
-def _v4_signals(fault_name: str, internal_fingerprint: str) -> list[str]:
-    biased = _FAULT_SIGNAL_BIAS.get(fault_name, ())
+def _v4_signals(
+    fault_name: str,
+    internal_fingerprint: str,
+    *,
+    bias: tuple[str, ...] | None = None,
+) -> list[str]:
+    biased = _FAULT_SIGNAL_BIAS.get(fault_name, ()) if bias is None else tuple(bias)
     seed = hashlib.sha256(f"crashdiag:v4:signals:{internal_fingerprint}".encode("utf-8")).digest()
     rng = random.Random(int.from_bytes(seed[:8], "big"))
     chosen: list[str] = []
@@ -683,19 +716,34 @@ def generate_hard_records(
     return rows
 
 
-def _v5_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
+def _v5_observation(
+    observation: Mapping[str, Any],
+    *,
+    workflow_name: str | None = None,
+) -> dict[str, Any]:
     """Render the v5 workflow observation.
 
     v5 keeps the operator-style opaque telemetry from v4 but removes the legacy
     ``candidate_repairs`` field and any hidden sub-fault labels.  The policy must
     infer the multi-action workflow from signals, signature, and recent events.
+
+    ``workflow_name`` is supplied by generation/replay so the signature and
+    signal bias describe the full workflow rather than a single detected
+    sub-fault; callers without it fall back to the legacy single-fault view.
     """
 
-    fault_name = _active_fault_name(observation)
-    signature = _OPAQUE_SIGNATURES_V4.get(
-        fault_name,
-        _OPAQUE_SIGNATURES.get(fault_name, "sig-v5"),
-    )
+    if workflow_name:
+        signature = _workflow_signature(workflow_name)
+        signal_bias = _workflow_signal_bias(workflow_name)
+        signal_key = workflow_name
+    else:
+        fault_name = _active_fault_name(observation)
+        signature = _OPAQUE_SIGNATURES_V4.get(
+            fault_name,
+            _OPAQUE_SIGNATURES.get(fault_name, "sig-v5"),
+        )
+        signal_bias = None
+        signal_key = fault_name
     ticks = int(observation.get("clock_ticks", 0))
     internal_fingerprint = json.dumps(
         observation,
@@ -707,7 +755,11 @@ def _v5_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
     window = hashlib.sha256(
         f"crashdiag:v5:telemetry:{internal_fingerprint}".encode("utf-8")
     ).hexdigest()[:12]
-    signals = _v4_signals(fault_name, internal_fingerprint)
+    signals = _v4_signals(
+        signal_key,
+        internal_fingerprint,
+        bias=signal_bias,
+    )
     recent_events = _v4_recent_events(observation)
     telemetry: dict[str, Any] = {
         "signature": signature,
@@ -722,19 +774,25 @@ def _v5_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def hard_observation_workflow(observation: Mapping[str, Any]) -> dict[str, Any]:
+def hard_observation_workflow(
+    observation: Mapping[str, Any],
+    *,
+    workflow_name: str | None = None,
+) -> dict[str, Any]:
     """Return the evidence-only opaque telemetry for the v5 curriculum."""
 
-    return _v5_observation(observation)
+    return _v5_observation(observation, workflow_name=workflow_name)
 
 
 def hard_observation_workflow_messages(
     observation: Mapping[str, Any],
+    *,
+    workflow_name: str | None = None,
 ) -> list[dict[str, str]]:
     """Render the exact schema-v5 conversational prompt."""
 
     content = json.dumps(
-        {"observation": hard_observation_workflow(observation)},
+        {"observation": hard_observation_workflow(observation, workflow_name=workflow_name)},
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
@@ -823,7 +881,7 @@ def build_v5_sample(
         scenario_seed,
         profile,
     )
-    prompt = hard_observation_workflow_messages(target.observe())
+    prompt = hard_observation_workflow_messages(target.observe(), workflow_name=fault_name)
     expert = hard_expert_workflow(fault_name)
     for action in expert["actions"]:
         target.execute_action(action["action"], action["parameters"])

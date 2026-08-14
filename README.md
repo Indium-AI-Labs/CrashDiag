@@ -44,11 +44,11 @@ docker compose -f compose.yaml -f compose.public.yaml up --detach --build
 curl.exe --fail https://sandbox.example.com/healthz
 ```
 
-Generate fresh v5 data (20,000 train and 2,000 eval variations per task):
+Generate fresh v5 data (5,000 train and 25 eval variations per task):
 
 ```powershell
 python -m pip install -e ".[artifacts]"
-python -m training.generate_dataset --train-samples-per-fault 20000 --eval-samples-per-fault 2000 --seed 42
+python -m training.generate_dataset --train-samples-per-fault 5000 --eval-samples-per-fault 25 --seed 42
 ```
 
 ## Validation

@@ -259,7 +259,9 @@ def mechanical_reward(
                     profile,
                     sandbox=sandbox,
                 )
-                expected_prompt = hard_observation_workflow_messages(sandbox.observe())
+                expected_prompt = hard_observation_workflow_messages(
+                    sandbox.observe(), workflow_name=str(name)
+                )
             elif version in (3, 4):
                 if not isinstance(profile, str):
                     raise TypeError("schema-v2 scenarios require scenario_profile")

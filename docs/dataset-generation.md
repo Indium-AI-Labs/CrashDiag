@@ -1,15 +1,15 @@
 # CrashDiag v5 Dataset Generation
 
-The v5 generator produces 52-task, multi-action datasets. Because the target train set
-is ~1M rows, generation uses chunked streaming writes and process-level parallelism
-rather than building the full row list in memory.
+The v5 generator produces 52-task, multi-action datasets. The target train set is
+~260k rows (5,000 per task); generation uses chunked streaming writes and
+process-level parallelism rather than building the full row list in memory.
 
 ## CLI
 
 ```powershell
 python -m training.generate_dataset `
-  --train-samples-per-fault 20000 `
-  --eval-samples-per-fault 2000 `
+  --train-samples-per-fault 5000 `
+  --eval-samples-per-fault 25 `
   --seed 42
 ```
 
@@ -17,8 +17,8 @@ Defaults:
 
 | flag | default |
 |---|---|
-| `--train-samples-per-fault` | `20000` |
-| `--eval-samples-per-fault` | `2000` |
+| `--train-samples-per-fault` | `5000` |
+| `--eval-samples-per-fault` | `25` |
 | `--seed` | `42` |
 
 Outputs land under `data/`:
@@ -61,7 +61,7 @@ dataset.
 
 ## Throughput notes
 
-- A 1,040,000-row train set is multi-GB on disk. Use streaming chunked writes and
+- A 260,000-row train set is multi-GB on disk. Use streaming chunked writes and
   `sync_bucket`/`upload_directory` semantics for upload rather than holding all files
   in memory.
 - Train/eval seeds are disjoint by construction; no random split is performed.
