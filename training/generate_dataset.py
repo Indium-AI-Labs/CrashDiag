@@ -280,6 +280,8 @@ def generate_records(
 
     sft_rows: list[dict[str, Any]] = []
     grpo_rows: list[dict[str, Any]] = []
+    total_rows = samples_per_fault * len(WORKFLOW_NAMES)
+    completed = 0
     # Round-robin order keeps every contiguous group of 52 samples stratified.
     for variation_index in range(start_variation, start_variation + samples_per_fault):
         for fault_name in WORKFLOW_NAMES:
@@ -291,6 +293,13 @@ def generate_records(
             )
             sft_rows.append(sft)
             grpo_rows.append(grpo)
+            completed += 1
+            if completed % 5000 == 0 or completed == total_rows:
+                print(
+                    f"  [{split}] {completed:,}/{total_rows:,} rows "
+                    f"({completed / total_rows:.1%})",
+                    flush=True,
+                )
     return sft_rows, grpo_rows
 
 
