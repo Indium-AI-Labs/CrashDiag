@@ -54,9 +54,9 @@ Optional:
 
 ## Kaggle secrets
 
-Eval notebooks (`eval_sft.ipynb`, `eval_grpo.ipynb`) load secrets via
-`kaggle_secrets.UserSecretsClient` when available and do not hard-fail when the local
-`env.txt` / `.env` is absent, so the same notebook runs unchanged on Kaggle.
+All notebooks (`sft.ipynb`, `eval_sft.ipynb`, `grpo.ipynb`, `eval_grpo.ipynb`) load
+secrets via `kaggle_secrets.UserSecretsClient` when available and do not hard-fail when
+the local `env.txt` / `.env` is absent, so the same notebook runs unchanged on Kaggle.
 
 ## Evaluation behavior
 

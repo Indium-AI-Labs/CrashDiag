@@ -65,17 +65,13 @@ class ModelNotebookTests(unittest.TestCase):
                 self.assertIn("display(SVG", source)
                 self.assertIn('"reports"', source)
 
-    def test_eval_sft_and_eval_grpo_use_kaggle_secrets(self) -> None:
+    def test_all_notebooks_use_kaggle_secrets(self) -> None:
         for slug in PER_MODEL:
-            for name in ("eval_sft.ipynb", "eval_grpo.ipynb"):
+            for name in NOTEBOOK_NAMES:
                 source = _source(NOTEBOOK_ROOT / slug / name)
                 self.assertIn("UserSecretsClient", source)
                 self.assertIn("kaggle_secrets", source)
                 self.assertIn("loaded Kaggle secret names", source)
-            for name in ("sft.ipynb", "grpo.ipynb"):
-                source = _source(NOTEBOOK_ROOT / slug / name)
-                self.assertNotIn("UserSecretsClient", source)
-                self.assertNotIn("kaggle_secrets", source)
 
     def test_eval_sft_requires_sft_run_id(self) -> None:
         for slug in PER_MODEL:

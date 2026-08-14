@@ -213,7 +213,7 @@ def build_sft(model_slug: str, base_model: str) -> dict:
     return _nb(
         f"{model_slug} QLoRA SFT",
         [
-            _setup_cell("env.txt", kaggle=False),
+            _setup_cell("env.txt", kaggle=True),
             _model_cell(model_slug, base_model),
             f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
@@ -300,7 +300,13 @@ def build_grpo(model_slug: str, base_model: str) -> dict:
     return _nb(
         f"{model_slug} GRPO",
         [
-            _setup_cell(".env", kaggle=False),
+            _setup_cell(
+                ".env",
+                kaggle=True,
+                stage_aliases='''    "CRASHDIAG_SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
+    "SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
+''',
+            ),
             _model_cell(model_slug, base_model),
             f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
@@ -445,7 +451,7 @@ def build_sft_all() -> dict:
     return _nb(
         "Qwen2.5 SFT all models (one run ID)",
         [
-            _setup_cell("env.txt", kaggle=False),
+            _setup_cell("env.txt", kaggle=True),
             _models_setup_cell(),
             _datasets_cell(),
             f'''import subprocess, sys
@@ -501,7 +507,13 @@ def build_grpo_all() -> dict:
     return _nb(
         "Qwen2.5 GRPO all models (one run ID)",
         [
-            _setup_cell(".env", kaggle=False),
+            _setup_cell(
+                ".env",
+                kaggle=True,
+                stage_aliases='''    "CRASHDIAG_SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
+    "SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID",
+''',
+            ),
             _models_setup_cell(),
             f'''from pathlib import Path
 from training.artifacts import ArtifactConfig, ArtifactUploader
