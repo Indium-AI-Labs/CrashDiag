@@ -52,6 +52,9 @@ from .hard_scenarios import (
 SCHEMA_VERSION = 5
 DEFAULT_TRAIN_SAMPLES_PER_FAULT = 5000
 DEFAULT_EVAL_SAMPLES_PER_FAULT = 25
+# Eval variations start at a fixed high offset so shrinking the train set does
+# not change the held-out rows or invalidate previously reported eval results.
+EVAL_START_VARIATION = 1_000_000
 DEFAULT_DATASET_BUCKET = "devaanshpa/CrashDiag"
 DEFAULT_SFT_TRAIN_OUTPUT = Path("data/sft_train.jsonl")
 DEFAULT_SFT_EVAL_OUTPUT = Path("data/sft_eval.jsonl")
@@ -328,6 +331,11 @@ def generate_datasets(
     resolved_paths = [path.resolve() for path in paths.values()]
     if len(set(resolved_paths)) != len(resolved_paths):
         raise ValueError("all SFT, GRPO, and summary output paths must be different files")
+    if train_samples_per_fault > EVAL_START_VARIATION:
+        raise ValueError(
+            "train_samples_per_fault must not exceed the fixed eval offset "
+            f"({EVAL_START_VARIATION}); choose a smaller train set"
+        )
 
     sft_train, grpo_train = generate_records(
         samples_per_fault=train_samples_per_fault,
@@ -338,7 +346,7 @@ def generate_datasets(
     sft_eval, grpo_eval = generate_records(
         samples_per_fault=eval_samples_per_fault,
         seed=seed,
-        start_variation=train_samples_per_fault,
+        start_variation=EVAL_START_VARIATION,
         split="eval",
     )
     counts = {

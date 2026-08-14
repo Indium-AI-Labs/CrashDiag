@@ -92,5 +92,6 @@ GRPO rows are answer-free and carry no `completion`.
 | train | 5,000 | 260,000 |
 | eval | 25 | 1,300 |
 
-Train and eval variations are disjoint by construction (eval `variation_index` starts
-at the train count).
+Train and eval variations are disjoint by construction: train starts at
+`variation_index` 0 and eval starts at a fixed offset of 1,000,000, so changing
+the train size does not change the held-out eval rows.

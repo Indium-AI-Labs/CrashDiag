@@ -64,4 +64,6 @@ dataset.
 - A 260,000-row train set is multi-GB on disk. Use streaming chunked writes and
   `sync_bucket`/`upload_directory` semantics for upload rather than holding all files
   in memory.
-- Train/eval seeds are disjoint by construction; no random split is performed.
+- Train/eval seeds are disjoint by construction: train starts at variation 0 and
+  eval starts at a fixed offset of 1,000,000, so shrinking the train set leaves
+  the eval set unchanged.
