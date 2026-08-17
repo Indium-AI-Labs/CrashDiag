@@ -20,6 +20,7 @@ NOTEBOOK_NAMES = {
     "grpo.ipynb",
     "eval_grpo.ipynb",
     "eval_base.ipynb",
+    "run_all.ipynb",
 }
 TOP_LEVEL: set[str] = set()
 

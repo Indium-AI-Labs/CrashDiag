@@ -13,6 +13,8 @@ Only `notebooks/qwen2.5_3b/` remains:
 - `grpo.ipynb` — GRPO smoke then full, followed by eval.
 - `eval_grpo.ipynb` — held-out GRPO evaluation.
 - `eval_base.ipynb` — base-model evaluation (few-shot, no checkpoint download).
+- `run_all.ipynb` — runs the whole pipeline end-to-end in one notebook
+  (dataset generation → base eval → SFT → SFT eval → GRPO → GRPO eval).
 
 Regenerate them after any template change:
 

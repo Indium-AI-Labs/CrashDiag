@@ -441,6 +441,194 @@ if exit_code: raise RuntimeError(f"Base model evaluation failed: {{exit_code}}")
     )
 
 
+def build_run_all(model_slug: str, base_model: str) -> dict:
+    """Full pipeline in one notebook: dataset -> base eval -> sft -> sft eval -> grpo -> grpo eval."""
+
+    return _nb(
+        f"{model_slug} full pipeline (run all)",
+        [
+            _setup_cell("env.txt", kaggle=True),
+            f'''from datetime import datetime
+from zoneinfo import ZoneInfo
+import os
+
+BASE_MODEL = "{base_model}"
+MODEL_SLUG = "{model_slug}"
+BUCKET_ID = "{BUCKET_ID}"
+TRAIN_SAMPLES_PER_FAULT = int(os.environ.get("CRASHDIAG_TRAIN_SAMPLES_PER_FAULT", "1000"))
+EVAL_SAMPLES_PER_FAULT = int(os.environ.get("CRASHDIAG_EVAL_SAMPLES_PER_FAULT", "25"))
+TRAIN_FILE = "grpo_train.jsonl"
+EVAL_FILE = "grpo_eval.jsonl"
+
+def ist_run_id(stage):
+    return datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%dT%H%M%SIST") + f"-{{MODEL_SLUG}}-{{stage}}"
+
+DATASET_RUN_ID = os.environ.get("CRASHDIAG_DATASET_RUN_ID", "").strip() or ist_run_id("dataset")
+BASE_EVAL_RUN_ID = os.environ.get("CRASHDIAG_BASE_EVAL_RUN_ID", "").strip() or ist_run_id("base-eval")
+SFT_RUN_ID = os.environ.get("CRASHDIAG_SFT_RUN_ID", "").strip() or ist_run_id("sft")
+SFT_EVAL_RUN_ID = os.environ.get("CRASHDIAG_SFT_EVAL_RUN_ID", "").strip() or ist_run_id("sft-eval")
+GRPO_RUN_ID = os.environ.get("CRASHDIAG_GRPO_RUN_ID", "").strip() or ist_run_id("grpo")
+GRPO_EVAL_RUN_ID = os.environ.get("CRASHDIAG_GRPO_EVAL_RUN_ID", "").strip() or ist_run_id("grpo-eval")
+
+print(f"base_model={{BASE_MODEL}}")
+print(f"train_samples_per_fault={{TRAIN_SAMPLES_PER_FAULT}}")
+print(f"eval_samples_per_fault={{EVAL_SAMPLES_PER_FAULT}}")
+''',
+            f'''from pathlib import Path
+from training.generate_dataset import generate_datasets
+from training.artifacts import ArtifactConfig, ArtifactUploader, runtime_metadata
+
+print(f"generating dataset: {{TRAIN_SAMPLES_PER_FAULT}} train / {{EVAL_SAMPLES_PER_FAULT}} eval per task")
+generate_datasets(
+    train_samples_per_fault=TRAIN_SAMPLES_PER_FAULT,
+    eval_samples_per_fault=EVAL_SAMPLES_PER_FAULT,
+    seed=42,
+)
+
+token = os.environ["HF_TOKEN"]
+uploader = ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=token, policy="required"))
+source_commit = str(runtime_metadata().get("git_commit", "unknown"))
+uploader.start_run({{"entrypoint": "notebooks.run_all", "source_commit": source_commit}})
+uploader.start_stage("datasets", {{
+    "source_commit": source_commit,
+    "seed": 42,
+    "train_samples_per_fault": TRAIN_SAMPLES_PER_FAULT,
+    "eval_samples_per_fault": EVAL_SAMPLES_PER_FAULT,
+    "schema_version": 5,
+    "curriculum_version": 5,
+}})
+uploader.upload_files([
+    "data/sft_train.jsonl",
+    "data/sft_eval.jsonl",
+    "data/grpo_train.jsonl",
+    "data/grpo_eval.jsonl",
+    "data/grpo_summary.json",
+], "datasets", metadata={{
+    "source_commit": source_commit,
+    "seed": 42,
+    "mechanically_validated": True,
+    "grpo_targets_included": False,
+    "curricula": ["v5"],
+}})
+uploader.complete_run({{"stages": ["datasets"]}})
+print("datasets uploaded:", uploader.remote_uri("datasets"))
+''',
+            f'''from pathlib import Path
+from training.artifacts import ArtifactConfig, ArtifactUploader
+
+DATASET_DIR = Path("artifacts/datasets")
+ArtifactUploader(ArtifactConfig(bucket_id=BUCKET_ID, run_id=DATASET_RUN_ID, token=os.environ["HF_TOKEN"])).download_stage("datasets", DATASET_DIR)
+assert (DATASET_DIR / EVAL_FILE).is_file(), f"dataset stage missing {{EVAL_FILE}}"
+print("datasets downloaded to", DATASET_DIR)
+''',
+            f'''from training.evaluate_jsonl import main as evaluate_main
+
+exit_code = evaluate_main([
+    "--model", BASE_MODEL, "--dataset", str(DATASET_DIR / EVAL_FILE),
+    "--output-dir", "outputs/base-eval", "--load-in-4bit", "--precision", "bf16",
+    "--max-new-tokens", "64",
+    "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+    "--artifact-bucket", BUCKET_ID, "--run-id", BASE_EVAL_RUN_ID, "--artifact-stage", "base-eval",
+])
+if exit_code: raise RuntimeError(f"base eval failed: {{exit_code}}")
+print("base eval complete:", BASE_EVAL_RUN_ID)
+''',
+            f'''import subprocess, sys
+
+command = [
+    sys.executable, "-m", "accelerate.commands.launch",
+    "--num_processes", "1", "--num_machines", "1",
+    "--mixed_precision", "bf16", "--dynamo_backend", "no",
+    "-m", "training.sft",
+    "--model", BASE_MODEL,
+    "--dataset", str(DATASET_DIR / "sft_train.jsonl"),
+    "--eval-dataset", str(DATASET_DIR / "sft_eval.jsonl"),
+    "--output-dir", "outputs/sft",
+    "--epochs", "1",
+    "--batch-size", "8",
+    "--eval-batch-size", "8",
+    "--gradient-accumulation-steps", "8",
+    "--max-length", "512",
+    "--learning-rate", "2e-4",
+    "--lora-rank", "16", "--lora-alpha", "32",
+    "--load-in-4bit",
+    "--precision", "bf16",
+    "--report-to", "none",
+    "--artifact-bucket", BUCKET_ID,
+    "--run-id", SFT_RUN_ID,
+]
+subprocess.run(command, check=True)
+print("SFT complete:", SFT_RUN_ID)
+''',
+            f'''from training.evaluate_jsonl import main as evaluate_main
+
+exit_code = evaluate_main([
+    "--model", "outputs/sft", "--dataset", str(DATASET_DIR / EVAL_FILE),
+    "--output-dir", "outputs/sft-eval", "--load-in-4bit", "--precision", "bf16",
+    "--max-new-tokens", "64",
+    "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+    "--artifact-bucket", BUCKET_ID, "--run-id", SFT_EVAL_RUN_ID, "--artifact-stage", "sft-eval",
+    "--no-few-shot",
+])
+if exit_code: raise RuntimeError(f"SFT eval failed: {{exit_code}}")
+print("SFT eval complete:", SFT_EVAL_RUN_ID)
+''',
+            f'''import subprocess, sys
+
+common = [
+    sys.executable, "-m", "accelerate.commands.launch",
+    "--num_processes", "1", "--num_machines", "1",
+    "--mixed_precision", "bf16", "--dynamo_backend", "no",
+    "-m", "training.grpo", "--model", "outputs/sft",
+    "--train-file", str(DATASET_DIR / TRAIN_FILE),
+    "--eval-file", str(DATASET_DIR / EVAL_FILE),
+    "--output-dir", "outputs/grpo", "--load-in-4bit", "--precision", "bf16",
+    "--batch-size", "2", "--gradient-accumulation-steps", "4", "--num-generations", "2",
+    "--max-prompt-length", "1024", "--max-completion-length", "64",
+    "--max-steps", "24", "--artifact-bucket", BUCKET_ID, "--run-id", GRPO_RUN_ID,
+    "--artifact-stage", "grpo-smoke", "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+]
+subprocess.run(common, check=True)
+full = common[:]
+full[full.index("24")] = "96"
+full[full.index("grpo-smoke")] = "grpo"
+subprocess.run(full, check=True)
+print("GRPO complete:", GRPO_RUN_ID)
+''',
+            f'''from training.evaluate_jsonl import main as evaluate_main
+
+exit_code = evaluate_main([
+    "--model", "outputs/grpo", "--dataset", str(DATASET_DIR / EVAL_FILE),
+    "--output-dir", "outputs/grpo-eval", "--load-in-4bit", "--precision", "bf16",
+    "--max-new-tokens", "64",
+    "--sandbox-url", os.environ["CRASHDIAG_SANDBOX_URL"],
+    "--artifact-bucket", BUCKET_ID, "--run-id", GRPO_EVAL_RUN_ID, "--artifact-stage", "grpo-eval",
+    "--no-few-shot",
+])
+if exit_code: raise RuntimeError(f"GRPO eval failed: {{exit_code}}")
+print("GRPO eval complete:", GRPO_EVAL_RUN_ID)
+''',
+            f'''from IPython.display import SVG, display
+from pathlib import Path
+
+for stage in ("base-eval", "sft", "sft-eval", "grpo", "grpo-eval"):
+    reports = Path("outputs") / stage / "reports"
+    charts = sorted(reports.glob("*.svg")) if reports.is_dir() else []
+    print(f"== {{stage}}: {{len(charts)}} charts ==")
+    for chart in charts:
+        display(SVG(filename=str(chart)))
+''',
+            f'''print("\\n=== RUN ALL COMPLETE ===")
+print(f"dataset:      {{DATASET_RUN_ID}}")
+print(f"base eval:    {{BASE_EVAL_RUN_ID}}")
+print(f"sft:          {{SFT_RUN_ID}}")
+print(f"sft eval:     {{SFT_EVAL_RUN_ID}}")
+print(f"grpo:         {{GRPO_RUN_ID}}")
+print(f"grpo eval:    {{GRPO_EVAL_RUN_ID}}")''',
+        ],
+    )
+
+
 # --- all-models training notebooks ------------------------------------------
 #
 # Both notebooks share ONE run ID for every model.  Each model's training
@@ -787,12 +975,13 @@ def main() -> int:
             "grpo.ipynb": build_grpo(slug, base),
             "eval_grpo.ipynb": build_eval_grpo(slug, base),
             "eval_base.ipynb": build_eval_base(slug, base),
+            "run_all.ipynb": build_run_all(slug, base),
         }
         for name, nb in specs.items():
             (folder / name).write_text(
                 json.dumps(nb, indent=1) + "\n", encoding="utf-8"
             )
-        print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo, eval_base)")
+        print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo, eval_base, run_all)")
     return 0
 
 
