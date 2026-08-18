@@ -425,6 +425,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--learning-rate", type=float, default=1.0e-5)
+    parser.add_argument(
+        "--lr-scheduler-type",
+        default="linear",
+        choices=("linear", "cosine", "constant", "constant_with_warmup"),
+    )
+    parser.add_argument("--warmup-ratio", type=float, default=0.03)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--num-generations", type=int, default=4)
@@ -722,6 +728,7 @@ def main(argv: list[str] | None = None) -> int:
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
         learning_rate=args.learning_rate,
+        lr_scheduler_type=args.lr_scheduler_type,
         optim="paged_adamw_8bit" if args.load_in_4bit else "adamw_torch",
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -753,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         data_seed=args.seed,
         trust_remote_code=args.trust_remote_code,
-        warmup_ratio=0.03,
+        warmup_ratio=args.warmup_ratio,
         use_vllm=args.use_vllm,
         vllm_mode=args.vllm_mode,
         vllm_server_base_url=args.vllm_server_base_url,

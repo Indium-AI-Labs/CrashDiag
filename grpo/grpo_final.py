@@ -86,8 +86,19 @@ def main() -> int:
         or ist_run_id("grpo-eval")
     )
     max_steps = os.environ.get("CRASHDIAG_GRPO_MAX_STEPS", "832")
-    num_generations = os.environ.get("CRASHDIAG_GRPO_NUM_GENERATIONS", "2")
-    max_completion = os.environ.get("CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH", "64")
+    # Four samples give GRPO a meaningful within-prompt ranking signal.  The
+    # previous two-sample run collapsed to identical 42-token completions.
+    num_generations = os.environ.get("CRASHDIAG_GRPO_NUM_GENERATIONS", "4")
+    max_completion = os.environ.get("CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH", "96")
+    learning_rate = os.environ.get("CRASHDIAG_GRPO_LEARNING_RATE", "5e-6")
+    lr_scheduler = os.environ.get(
+        "CRASHDIAG_GRPO_LR_SCHEDULER", "constant_with_warmup"
+    )
+    warmup_ratio = os.environ.get("CRASHDIAG_GRPO_WARMUP_RATIO", "0.05")
+    temperature = os.environ.get("CRASHDIAG_GRPO_TEMPERATURE", "1.0")
+    top_p = os.environ.get("CRASHDIAG_GRPO_TOP_P", "0.95")
+    logging_steps = os.environ.get("CRASHDIAG_GRPO_LOGGING_STEPS", "10")
+    save_steps = os.environ.get("CRASHDIAG_GRPO_SAVE_STEPS", "200")
     # The trainer performs a final evaluation after training. Keep periodic
     # evaluation beyond max_steps so it does not interrupt the training loop.
     eval_steps = os.environ.get("CRASHDIAG_GRPO_EVAL_STEPS", "1000000000")
@@ -144,6 +155,20 @@ def main() -> int:
             "4",
             "--num-generations",
             num_generations,
+            "--learning-rate",
+            learning_rate,
+            "--lr-scheduler-type",
+            lr_scheduler,
+            "--warmup-ratio",
+            warmup_ratio,
+            "--temperature",
+            temperature,
+            "--top-p",
+            top_p,
+            "--logging-steps",
+            logging_steps,
+            "--save-steps",
+            save_steps,
             "--max-prompt-length",
             "1024",
             "--max-completion-length",
