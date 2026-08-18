@@ -149,10 +149,12 @@ def main() -> int:
             "--no-load-in-4bit",
             "--precision",
             "bf16",
+            # Four generations require the global train/eval batch to be
+            # divisible by four. Keep the effective batch at eight.
             "--batch-size",
-            "2",
-            "--gradient-accumulation-steps",
             "4",
+            "--gradient-accumulation-steps",
+            "2",
             "--num-generations",
             num_generations,
             "--learning-rate",
