@@ -122,8 +122,7 @@ def main() -> int:
     if not train_file.is_file() or not eval_file.is_file():
         raise RuntimeError(f"Dataset stage is missing {train_file} or {eval_file}")
 
-    run(
-        [
+    eval_command = [
             sys.executable,
             "-u",
             "-m",
@@ -221,7 +220,12 @@ def main() -> int:
             "grpo-eval",
             "--no-few-shot",
         ]
-    )
+    if os.environ.get("CRASHDIAG_SKIP_GRPO_EVAL", "0").lower() not in {
+        "1", "true", "yes"
+    }:
+        run(eval_command)
+    else:
+        print("Skipping final GRPO evaluation (CRASHDIAG_SKIP_GRPO_EVAL=1)", flush=True)
     print(
         f"GRPO complete. Reports: hf://buckets/{bucket_id}/runs/"
         f"{eval_run_id}/grpo-eval/reports",
