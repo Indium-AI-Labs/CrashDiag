@@ -1,7 +1,7 @@
 """Generate per-model Qwen2.5 notebook folders plus an all-baselines eval.
 
-Each model gets a folder under notebooks/ with sft, eval_sft, grpo, and
-eval_grpo notebooks (templated from the proven qwen3_14b workflow), and a
+Each model gets a folder under notebooks/ with grpo and eval_grpo notebooks
+(templated from the proven workflow), and a
 top-level notebooks/eval_all_baselines.ipynb evaluates every base model in
 one run, uploading each report to the private HF bucket.
 
@@ -970,8 +970,6 @@ def main() -> int:
         folder = NOTEBOOK_ROOT / slug
         folder.mkdir(parents=True, exist_ok=True)
         specs = {
-            "sft.ipynb": build_sft(slug, base),
-            "eval_sft.ipynb": build_eval_sft(slug, base),
             "grpo.ipynb": build_grpo(slug, base),
             "eval_grpo.ipynb": build_eval_grpo(slug, base),
             "eval_base.ipynb": build_eval_base(slug, base),
@@ -981,7 +979,7 @@ def main() -> int:
             (folder / name).write_text(
                 json.dumps(nb, indent=1) + "\n", encoding="utf-8"
             )
-        print(f"wrote {folder}/ (sft, eval_sft, grpo, eval_grpo, eval_base, run_all)")
+        print(f"wrote {folder}/ (grpo, eval_grpo, eval_base, run_all)")
     return 0
 
 

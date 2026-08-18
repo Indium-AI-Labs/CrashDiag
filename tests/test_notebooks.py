@@ -15,8 +15,6 @@ PER_MODEL = {
     "qwen2.5_3b",
 }
 NOTEBOOK_NAMES = {
-    "sft.ipynb",
-    "eval_sft.ipynb",
     "grpo.ipynb",
     "eval_grpo.ipynb",
     "eval_base.ipynb",
@@ -62,7 +60,7 @@ class ModelNotebookTests(unittest.TestCase):
                 self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
                 self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
                 self.assertIn("CRASHDIAG_ENV_FILE", source)
-                if name in {"eval_sft.ipynb", "grpo.ipynb", "eval_grpo.ipynb", "eval_base.ipynb"}:
+                if name in {"grpo.ipynb", "eval_grpo.ipynb", "eval_base.ipynb"}:
                     self.assertIn("CRASHDIAG_CURRICULUM", source)
                 self.assertIn("display(SVG", source)
                 self.assertIn('"reports"', source)
@@ -77,10 +75,9 @@ class ModelNotebookTests(unittest.TestCase):
 
     def test_eval_sft_requires_sft_run_id(self) -> None:
         for slug in PER_MODEL:
-            source = _source(NOTEBOOK_ROOT / slug / "eval_sft.ipynb")
-            self.assertIn('"SFT_RUN_ID": "CRASHDIAG_SFT_RUN_ID"', source)
-            self.assertIn("kaggle_secret_errors", source)
-            self.assertIn('LAUNCH_DIR / "env.txt"', source)
+            source = _source(NOTEBOOK_ROOT / slug / "run_all.ipynb")
+            self.assertNotIn("SFT_RUN_ID", source)
+            self.assertIn("CRASHDIAG_ENV_FILE", source)
 
     def test_grpo_trains_and_evaluates_v5_curriculum_by_default(self) -> None:
         for slug in PER_MODEL:
@@ -92,7 +89,6 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn('"96"', grpo)
             self.assertIn("grpo-smoke", grpo)
             self.assertIn('TRAIN_FILE = "grpo_train.jsonl"', grpo)
-            self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_sft.ipynb"))
             self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
 
     def test_evaluation_has_few_shot_prompting(self) -> None:
