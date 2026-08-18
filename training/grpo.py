@@ -9,6 +9,7 @@ to score the resulting state.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import os
@@ -54,6 +55,16 @@ _SMOKE_HANDOFF_PATHS = (
     "reports/policy_diagnostics.svg",
     "reports/reward.svg",
 )
+
+
+def _compatible_config_kwargs(factory: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop GRPOConfig options unavailable in the installed TRL version."""
+
+    parameters = inspect.signature(factory).parameters.values()
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return kwargs
+    supported = {parameter.name for parameter in parameters}
+    return {name: value for name, value in kwargs.items() if name in supported}
 
 
 def configure_reward_backend(
@@ -705,7 +716,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--load-in-4bit requires an SFT adapter passed through --model")
 
     eval_enabled = eval_dataset is not None
-    config = GRPOConfig(
+    config = GRPOConfig(**_compatible_config_kwargs(GRPOConfig, dict(
         output_dir=args.output_dir,
         model_init_kwargs=model_init_kwargs,
         num_train_epochs=args.epochs,
@@ -746,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
         vllm_server_base_url=args.vllm_server_base_url,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         chat_template_kwargs={"enable_thinking": False},
-    )
+    )))
     callback = make_checkpoint_upload_callback(uploader, args.artifact_stage)
     trainer = GRPOTrainer(
         model=model,

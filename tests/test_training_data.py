@@ -26,6 +26,7 @@ from training.artifacts import ArtifactError
 from training.generate_dataset import generate_datasets, generate_records, main
 from training.generate_dataset import expert_workflow, prepare_scenario
 from training.sft import _compatible_config_kwargs, build_parser
+from training.grpo import _compatible_config_kwargs as grpo_compatible_config_kwargs
 
 
 class TrainingCommonTests(unittest.TestCase):
@@ -412,6 +413,18 @@ class SftCliTests(unittest.TestCase):
         self.assertIn('"paged_adamw_8bit" if args.load_in_4bit', source)
         self.assertIn("cast_trainable_parameters_to_fp32(trainer.model)", source)
         self.assertIn("_compatible_config_kwargs(", source)
+
+
+class GrpoConfigTests(unittest.TestCase):
+    def test_grpo_config_kwargs_drop_options_missing_from_legacy_trl(self) -> None:
+        def legacy_config(*, output_dir: str, max_steps: int) -> None:
+            return None
+
+        kwargs = grpo_compatible_config_kwargs(
+            legacy_config,
+            {"output_dir": "outputs/grpo", "max_steps": 4, "max_prompt_length": 1024},
+        )
+        self.assertEqual(kwargs, {"output_dir": "outputs/grpo", "max_steps": 4})
 
 
 if __name__ == "__main__":
