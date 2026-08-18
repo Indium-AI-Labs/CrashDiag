@@ -191,8 +191,7 @@ def main() -> int:
         ]
     )
 
-    run(
-        [
+    eval_command = [
             sys.executable,
             "-u",
             "-m",
