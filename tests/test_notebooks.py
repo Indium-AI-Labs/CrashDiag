@@ -63,7 +63,7 @@ class ModelNotebookTests(unittest.TestCase):
                 if name in {"grpo.ipynb", "eval_grpo.ipynb", "eval_base.ipynb"}:
                     self.assertIn("CRASHDIAG_CURRICULUM", source)
                 self.assertIn("display(SVG", source)
-                self.assertIn('"reports"', source)
+                self.assertIn("reports", source)
 
     def test_all_notebooks_use_kaggle_secrets(self) -> None:
         for slug in PER_MODEL:
@@ -73,7 +73,7 @@ class ModelNotebookTests(unittest.TestCase):
                 self.assertIn("kaggle_secrets", source)
                 self.assertIn("loaded Kaggle secret names", source)
 
-    def test_eval_sft_requires_sft_run_id(self) -> None:
+    def test_grpo_does_not_require_sft_run_id(self) -> None:
         for slug in PER_MODEL:
             source = _source(NOTEBOOK_ROOT / slug / "run_all.ipynb")
             self.assertNotIn("SFT_RUN_ID", source)
@@ -82,12 +82,11 @@ class ModelNotebookTests(unittest.TestCase):
     def test_grpo_trains_and_evaluates_v5_curriculum_by_default(self) -> None:
         for slug in PER_MODEL:
             grpo = _source(NOTEBOOK_ROOT / slug / "grpo.ipynb")
-            self.assertIn('"--train-file", str(DATASET_DIR / TRAIN_FILE)', grpo)
-            self.assertIn('"--eval-file", str(DATASET_DIR / EVAL_FILE)', grpo)
-            self.assertIn('"--max-steps", "24"', grpo)
-            self.assertIn('"--num-generations", "2"', grpo)
-            self.assertIn('"96"', grpo)
-            self.assertIn("grpo-smoke", grpo)
+            self.assertIn("'--train-file', str(DATASET_DIR / TRAIN_FILE)", grpo)
+            self.assertIn("'--eval-file', str(DATASET_DIR / EVAL_FILE)", grpo)
+            self.assertIn("'--num-generations', '2'", grpo)
+            self.assertIn('"--no-load-in-4bit"', grpo)
+            self.assertIn("directly from the base model", grpo)
             self.assertIn('TRAIN_FILE = "grpo_train.jsonl"', grpo)
             self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
 
