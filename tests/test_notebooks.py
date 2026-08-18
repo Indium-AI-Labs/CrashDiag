@@ -87,7 +87,7 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn("'--num-generations', '2'", grpo)
             self.assertIn("'--no-load-in-4bit'", grpo)
             self.assertIn("directly from the base model", grpo)
-            self.assertIn('TRAIN_FILE = "grpo_train.jsonl"', grpo)
+            self.assertIn("TRAIN_FILE, EVAL_FILE = 'grpo_train.jsonl', 'grpo_eval.jsonl'", grpo)
             self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
 
     def test_evaluation_has_few_shot_prompting(self) -> None:
