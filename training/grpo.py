@@ -740,7 +740,9 @@ def main(argv: list[str] | None = None) -> int:
         ddp_find_unused_parameters=False,
         logging_steps=args.logging_steps,
         logging_first_step=True,
-        log_completions=True,
+        # Keep scalar progress metrics live without dumping every prompt and
+        # generated workflow as a large Rich table.
+        log_completions=False,
         save_strategy="steps",
         save_steps=args.save_steps,
         save_total_limit=2,
