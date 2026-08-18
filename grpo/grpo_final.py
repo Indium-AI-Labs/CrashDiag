@@ -122,7 +122,8 @@ def main() -> int:
     if not train_file.is_file() or not eval_file.is_file():
         raise RuntimeError(f"Dataset stage is missing {train_file} or {eval_file}")
 
-    eval_command = [
+    run(
+        [
             sys.executable,
             "-u",
             "-m",
