@@ -51,6 +51,10 @@ fi
 export CRASHDIAG_ENV_FILE="${ENV_FILE}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
+# Keep training and deterministic evaluation on the same output budget. This
+# prevents the evaluator from truncating workflow JSON that trained correctly.
+export CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH="${CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH:-96}"
+export CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS="${CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS:-96}"
 
 echo "repo_root=${REPO_ROOT}"
 echo "env_file=${ENV_FILE}"
@@ -59,6 +63,7 @@ python3 -m pip uninstall -y torchao >/dev/null 2>&1 || true
 python3 -m pip install -e ".[train]"
 
 echo "Starting GRPO and final evaluation..."
+echo "completion_limit=${CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH} eval_limit=${CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS} strict_json_reward=1"
 python3 -u "${REPO_ROOT}/grpo/grpo_final.py" 2>&1 | tee -a "${LOG_FILE}"
 status=${PIPESTATUS[0]}
 echo "GRPO process exited with status ${status}"

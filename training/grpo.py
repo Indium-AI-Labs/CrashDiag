@@ -47,6 +47,7 @@ _SANDBOX_TOKEN = os.environ.get("CRASHDIAG_API_TOKEN") or os.environ.get(
     "CRASHDIAG_SANDBOX_TOKEN"
 )
 _SANDBOX_TIMEOUT = 15.0
+_STRICT_JSON_ONLY_REWARD = False
 _SMOKE_HANDOFF_PATHS = (
     "reports/smoke_gate.json",
     "reports/gradient_norm.svg",
@@ -81,6 +82,18 @@ def configure_reward_backend(
     _SANDBOX_URL = (sandbox_url or "").strip()
     _SANDBOX_TOKEN = api_token
     _SANDBOX_TIMEOUT = float(timeout)
+
+
+def configure_reward_policy(*, strict_json_only: bool = False) -> None:
+    """Configure policy-level reward guards for the current process.
+
+    Training can require an exact workflow JSON object before any sandbox
+    credit is awarded. Evaluation keeps the historical scoring mode unless
+    this option is explicitly enabled.
+    """
+
+    global _STRICT_JSON_ONLY_REWARD
+    _STRICT_JSON_ONLY_REWARD = bool(strict_json_only)
 
 
 def _new_sandbox() -> SandboxBackend:
@@ -314,7 +327,13 @@ def mechanical_reward(
                 if callable(counter)
                 else (total if resolved else 0)
             )
-            reward = resolved_count / total
+            if _STRICT_JSON_ONLY_REWARD and not strict_json:
+                # Do not let truncated or malformed action lists earn partial
+                # credit: that failure mode caused GRPO to optimize verbose
+                # multi-action strings that were unusable at inference time.
+                reward = 0.0
+            else:
+                reward = resolved_count / total
         except Exception as exc:
             # Any exception is a failed rollout. A model-supplied parameter
             # rejected by the action contract is a policy failure; replay,
@@ -440,6 +459,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
     parser.add_argument("--beta", type=float, default=0.0)
+    parser.add_argument(
+        "--strict-json-only-reward",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="award sandbox credit only when the completion is exact workflow JSON",
+    )
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--eval-steps", type=int, default=50)
@@ -578,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_positive(args)
+    configure_reward_policy(strict_json_only=args.strict_json_only_reward)
 
     uploader = None
     try:

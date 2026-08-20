@@ -90,6 +90,12 @@ def main() -> int:
     # previous two-sample run collapsed to identical 42-token completions.
     num_generations = os.environ.get("CRASHDIAG_GRPO_NUM_GENERATIONS", "4")
     max_completion = os.environ.get("CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH", "96")
+    # Keep generation and final evaluation limits aligned. The previous
+    # evaluator used 64 tokens while training allowed 96, truncating the
+    # learned workflow JSON and collapsing exact success.
+    eval_max_new_tokens = os.environ.get(
+        "CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS", max_completion
+    )
     learning_rate = os.environ.get("CRASHDIAG_GRPO_LEARNING_RATE", "5e-6")
     lr_scheduler = os.environ.get(
         "CRASHDIAG_GRPO_LR_SCHEDULER", "constant_with_warmup"
@@ -175,6 +181,7 @@ def main() -> int:
             "1024",
             "--max-completion-length",
             max_completion,
+            "--strict-json-only-reward",
             "--max-steps",
             max_steps,
             "--eval-steps",
@@ -207,7 +214,7 @@ def main() -> int:
             "--precision",
             "bf16",
             "--max-new-tokens",
-            "64",
+            eval_max_new_tokens,
             "--sandbox-url",
             sandbox_url,
             "--sandbox-token",
