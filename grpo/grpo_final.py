@@ -108,6 +108,8 @@ def main() -> int:
     # The trainer performs a final evaluation after training. Keep periodic
     # evaluation beyond max_steps so it does not interrupt the training loop.
     eval_steps = os.environ.get("CRASHDIAG_GRPO_EVAL_STEPS", "1000000000")
+    dataloader_workers = os.environ.get("CRASHDIAG_GRPO_DATALOADER_WORKERS", "4")
+    dataloader_prefetch = os.environ.get("CRASHDIAG_GRPO_DATALOADER_PREFETCH", "4")
 
     print(f"repo_root={REPO_ROOT}", flush=True)
     print(f"env_file={ENV_FILE}", flush=True)
@@ -182,6 +184,12 @@ def main() -> int:
             "--max-completion-length",
             max_completion,
             "--strict-json-only-reward",
+            "--dataloader-num-workers",
+            dataloader_workers,
+            "--dataloader-prefetch-factor",
+            dataloader_prefetch,
+            "--dataloader-pin-memory",
+            "--dataloader-persistent-workers",
             "--max-steps",
             max_steps,
             "--eval-steps",

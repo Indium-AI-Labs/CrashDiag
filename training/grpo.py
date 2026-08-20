@@ -459,6 +459,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=0)
     parser.add_argument("--beta", type=float, default=0.0)
+    parser.add_argument("--dataloader-num-workers", type=int, default=4)
+    parser.add_argument("--dataloader-prefetch-factor", type=int, default=4)
+    parser.add_argument(
+        "--dataloader-pin-memory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--dataloader-persistent-workers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument(
         "--strict-json-only-reward",
         action=argparse.BooleanOptionalAction,
@@ -523,6 +535,8 @@ def _validate_positive(args: argparse.Namespace) -> None:
         "sandbox_timeout": args.sandbox_timeout,
         "lora_r": args.lora_r,
         "lora_alpha": args.lora_alpha,
+        "dataloader_num_workers": args.dataloader_num_workers,
+        "dataloader_prefetch_factor": args.dataloader_prefetch_factor,
     }
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid:
@@ -533,6 +547,12 @@ def _validate_positive(args: argparse.Namespace) -> None:
         raise SystemExit("--top-p must be finite and in (0, 1]")
     if args.top_k < 0:
         raise SystemExit("--top-k cannot be negative")
+    if args.dataloader_num_workers < 0:
+        raise SystemExit("--dataloader-num-workers cannot be negative")
+    if args.dataloader_prefetch_factor < 1:
+        raise SystemExit("--dataloader-prefetch-factor must be positive")
+    if args.dataloader_num_workers == 0 and args.dataloader_persistent_workers:
+        raise SystemExit("persistent workers require --dataloader-num-workers > 0")
     if args.minimum_gate_steps < 1:
         raise SystemExit("--minimum-gate-steps must be positive")
     if args.require_nonzero_update and args.parent_reference is None:
@@ -766,6 +786,10 @@ def main(argv: list[str] | None = None) -> int:
         top_p=args.top_p,
         top_k=args.top_k,
         beta=args.beta,
+        dataloader_num_workers=args.dataloader_num_workers,
+        dataloader_prefetch_factor=args.dataloader_prefetch_factor,
+        dataloader_pin_memory=args.dataloader_pin_memory,
+        dataloader_persistent_workers=args.dataloader_persistent_workers,
         bf16=bf16,
         fp16=fp16,
         gradient_checkpointing=True,
