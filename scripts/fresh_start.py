@@ -4,7 +4,7 @@
 Run with the .env loaded (HF_TOKEN, CRASHDIAG_SANDBOX_URL, CRASHDIAG_API_TOKEN).
 
 Usage:
-  python scripts/fresh_start.py
+  python scripts/fresh_start.py --yes
   # prints the new CRASHDIAG_DATASET_RUN_ID to use in the notebooks
 
 The generated files land in data/:
@@ -24,9 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-DEFAULT_BUCKET = "devaanshpa/CrashDiag"
-
 
 def _automatic_run_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -55,15 +52,32 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-id", default=None, help="explicit run ID")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm local cleanup and deletion/recreation of the configured bucket",
+    )
     args = parser.parse_args()
+
+    if not args.yes:
+        raise SystemExit("Refusing destructive fresh start without explicit --yes")
 
     _load_env()
     token = os.environ.get("HF_TOKEN", "").strip()
     if not token:
         raise SystemExit("HF_TOKEN not set; add it to .env first")
+    bucket_id = os.environ.get("CRASHDIAG_HF_BUCKET_ID", "").strip()
+    if not bucket_id:
+        raise SystemExit("CRASHDIAG_HF_BUCKET_ID not set; add it to .env first")
 
     reset = subprocess.run(
-        [sys.executable, str(PROJECT_ROOT / "scripts" / "reset_pipeline.py")],
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "reset_pipeline.py"),
+            "--bucket-id",
+            bucket_id,
+            "--yes",
+        ],
         check=False,
     )
     if reset.returncode != 0:
@@ -90,7 +104,7 @@ def main() -> int:
     source_commit = str(runtime_metadata().get("git_commit", "unknown"))
     uploader = ArtifactUploader(
         ArtifactConfig(
-            bucket_id=os.environ.get("CRASHDIAG_HF_BUCKET_ID", DEFAULT_BUCKET),
+            bucket_id=bucket_id,
             run_id=run_id,
             token=token,
             policy="required",

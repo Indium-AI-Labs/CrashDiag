@@ -1,74 +1,70 @@
-# CrashDiag v5 Notebook Workflow
+# CrashDiag v5 notebook workflow
 
-v5 uses a single model: `Qwen/Qwen2.5-3B-Instruct`. The multi-model Qwen2.5 sweep
-notebooks (`qwen2.5_14b`, `7b`, `1.5b`, `0.5b` and the `*_all.ipynb` notebooks) are
-removed.
+The maintained notebooks use one model, `Qwen/Qwen2.5-3B-Instruct`, and train
+directly with GRPO. No SFT checkpoint or `CRASHDIAG_SFT_RUN_ID` is required.
 
 ## Notebooks
 
-Only `notebooks/qwen2.5_3b/` remains:
+`notebooks/qwen2.5_3b/` contains:
 
-- `sft.ipynb` — QLoRA SFT.
-- `eval_sft.ipynb` — held-out SFT evaluation.
-- `grpo.ipynb` — GRPO smoke then full, followed by eval.
-- `eval_grpo.ipynb` — held-out GRPO evaluation.
-- `eval_base.ipynb` — base-model evaluation (few-shot, no checkpoint download).
-- `run_all.ipynb` — runs the whole pipeline end-to-end in one notebook
-  (dataset generation → base eval → SFT → SFT eval → GRPO → GRPO eval).
+- `eval_base.ipynb` — held-out base-model replay evaluation.
+- `grpo.ipynb` — direct-from-base GRPO followed by standalone evaluation.
+- `eval_grpo.ipynb` — evaluate an existing GRPO artifact.
+- `run_all.ipynb` — generate data, evaluate the base model, train with GRPO,
+  evaluate the adapter, and display/upload reports.
 
-Regenerate them after any template change:
+All committed notebooks have empty execution counts and outputs so credentials,
+machine paths, and logs are not retained in Git.
 
-```powershell
-python scripts/generate_notebooks.py
-```
+## Required environment
 
-## Env variables
+The notebooks read `env.txt` from their launch directory unless
+`CRASHDIAG_ENV_FILE` overrides it. On Kaggle they can load the same keys from
+`kaggle_secrets.UserSecretsClient`.
 
-All notebooks read `env.txt` from their launch directory (override with
-`CRASHDIAG_ENV_FILE`). Use `.env.example.sft` and `.env.example.grpo` as the
-copy-paste templates and save the result as `env.txt`.
-
-Required (SFT):
+Required:
 
 - `HF_TOKEN`
-- `CRASHDIAG_DATASET_RUN_ID`
-
-Required (GRPO / eval, in addition to the above):
-
-- `CRASHDIAG_SFT_RUN_ID`
+- `CRASHDIAG_DATASET_RUN_ID` (except when `run_all.ipynb` generates a new stage)
 - `CRASHDIAG_SANDBOX_URL`
-- `CRASHDIAG_SANDBOX_TOKEN`
+- `CRASHDIAG_SANDBOX_TOKEN` or `CRASHDIAG_API_TOKEN`
 
 Optional:
 
-- `CRASHDIAG_CURRICULUM` (default `v5`)
+- `CRASHDIAG_GRPO_RUN_ID`
+- `CRASHDIAG_GRPO_EVAL_RUN_ID`
+- `CRASHDIAG_BASE_EVAL_RUN_ID`
+- `CRASHDIAG_HF_BUCKET_ID`
 - `CRASHDIAG_SOURCE_COMMIT`
 - `CRASHDIAG_REPO_URL`
-- `CRASHDIAG_ENV_FILE`
 - `CRASHDIAG_WORKDIR`
-- `CRASHDIAG_ALL_RUN_ID`
+- `CRASHDIAG_GRPO_MAX_STEPS`
+
+Use [`.env.example.grpo`](../.env.example.grpo) as the starting template.
 
 ## Stage handoff
 
-1. Dataset generation uploads one `datasets` stage. Its run ID becomes
-   `CRASHDIAG_DATASET_RUN_ID`.
-2. `sft.ipynb` uploads an `sft` stage; its run ID becomes `CRASHDIAG_SFT_RUN_ID`.
-3. `grpo.ipynb` downloads `datasets` + `sft`, runs a `grpo-smoke` stage then the full
-   `grpo` stage, then evaluates.
-4. `eval_sft.ipynb` / `eval_grpo.ipynb` upload `sft-eval` / `grpo-eval` stages.
+1. Dataset generation creates and mechanically validates the answer-free GRPO
+   train/eval JSONL files, then uploads a `datasets` stage.
+2. Base evaluation replays every held-out row and uploads `base-eval` reports.
+3. Direct GRPO downloads the dataset stage, starts from Qwen2.5-3B-Instruct,
+   and uploads the final LoRA adapter and trainer reports in a `grpo` stage.
+4. Standalone adapter evaluation downloads the final adapter, replays the same
+   held-out rows, and uploads a `grpo-eval` stage.
 
-## Kaggle secrets
+## Final-run configuration
 
-All notebooks (`sft.ipynb`, `eval_sft.ipynb`, `grpo.ipynb`, `eval_grpo.ipynb`,
-`eval_base.ipynb`) load secrets via `kaggle_secrets.UserSecretsClient` when available
-and do not hard-fail when the local `env.txt` is absent, so the same notebook runs
-unchanged on Kaggle.
+The released run used BF16 on one NVIDIA L4, batch size 4, gradient
+accumulation 2, four generations per prompt, learning rate `5e-6`, 5% warmup,
+and 832 optimizer steps. Training and standalone evaluation both use a 96-token
+completion limit and strict-JSON-only training reward.
 
 ## Evaluation behavior
 
-- Base-model and eval notebooks request the v5 workflow contract and evaluate with
-  `--no-few-shot` for post-training checkpoints (those should have internalized the
-  contract).
-- `evaluate_jsonl.py` replays each row exactly and reports success rate,
-  strict-JSON rate, backend-error rate, per-task and per-profile success, and
-  sub-fault progress.
+- Base and adapter evaluation use the same rows and `--no-few-shot`. The
+  retained historical base result predates this alignment and used the generic
+  format demonstration plus a 64-token limit; the released adapter used no
+  demonstration and a 96-token limit.
+- `training.evaluate_jsonl` records exact resolution, mean mechanical reward,
+  strict JSON, backend errors, per-fault results, and per-profile results.
+- Generated workflows are executed; prose plausibility is never graded.

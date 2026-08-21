@@ -4,12 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crashdiag"
-version = "0.3.0"
+version = "0.3.2"
 description = "Mechanically verified infrastructure-diagnosis RL environment"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "CrashDiag contributors" }]
+license = "MIT"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Indium-AI-Labs/CrashDiag"
+Documentation = "https://github.com/Indium-AI-Labs/CrashDiag/tree/main/docs"
+Repository = "https://github.com/Indium-AI-Labs/CrashDiag.git"
+Model = "https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO"
 
 [project.optional-dependencies]
 artifacts = [
@@ -34,6 +41,7 @@ crashdiag-generate = "training.generate_dataset:main"
 crashdiag-generate-grpo-hard = "training.generate_grpo_hard:main"
 crashdiag-sft = "training.sft:main"
 crashdiag-grpo = "training.grpo:main"
+crashdiag-grpo-pipeline = "training.grpo_pipeline:main"
 crashdiag-calibrate-grpo = "training.calibrate_grpo:main"
 crashdiag-evaluate = "training.evaluate:main"
 crashdiag-evaluate-jsonl = "training.evaluate_jsonl:main"

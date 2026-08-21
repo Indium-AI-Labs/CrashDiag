@@ -1,26 +1,35 @@
-# CrashDiag Documentation
+# CrashDiag documentation
 
-This directory is the source of truth for the v5 curriculum. The code registries in
-`crashdiag/` and `training/` are generated to match these documents.
+These documents describe the v5 mechanically verified environment and its
+reproducible training/evaluation workflow. Runtime registries in `crashdiag/`
+and `training/` are the executable source of truth.
 
 ## Index
 
-- [tasks.md](tasks.md) — the 52 mechanically-verifiable tasks, each resolved by an ordered multi-action workflow.
-- [actions.md](actions.md) — the 27-action space, the sandbox state each action mutates, and its mechanical verification.
-- [curriculum-v5.md](curriculum-v5.md) — v5 schema, workflow JSON contract, partial-credit reward, dataset sizes, version constants.
-- [dataset-generation.md](dataset-generation.md) — how to generate the v5 datasets, including the balanced 260k-row train set.
-- [notebook-workflow.md](notebook-workflow.md) — the single `qwen2.5_3b` pipeline, env vars, stage handoff, and Kaggle secrets.
-- [migration-v4-to-v5.md](migration-v4-to-v5.md) — what changed from the hard-v4 curriculum and why.
+- [Tasks](tasks.md) — the 52 mechanically verifiable fault families and their
+  ordered repair workflows.
+- [Actions](actions.md) — the 27-action space, sandbox mutations, and mechanical
+  checks.
+- [Curriculum v5](curriculum-v5.md) — schema, strict workflow contract,
+  partial-credit reward, and version constants.
+- [Dataset generation](dataset-generation.md) — deterministic generation,
+  validation, splits, and scaling.
+- [Notebook workflow](notebook-workflow.md) — the direct Qwen2.5-3B GRPO and
+  evaluation pipeline.
+- [Migration from v4](migration-v4-to-v5.md) — curriculum changes and rationale.
+- [Hugging Face model card](huggingface-model-card.md) — released adapter,
+  evaluation, usage, provenance, and limitations.
 
 ## Quick facts
 
 | Property | v5 value |
 |---|---|
-| Tasks | 52 |
-| Actions | 27 (plus `wait_and_observe` fallback) |
-| Model | `Qwen/Qwen2.5-3B-Instruct` |
-| Train rows | 260,000 (5,000 per task) |
-| Eval rows | 1,300 (25 per task) |
-| Workflow | one JSON reply with an ordered `actions` array |
-| Reward | partial credit (`resolved_subfaults / total_subfaults`) |
-| Curriculum version | `5` |
+| Fault families | 52 |
+| Actions | 27 plus `wait_and_observe` |
+| Base model | `Qwen/Qwen2.5-3B-Instruct` |
+| Released adapter | [`Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO`](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO) |
+| Retained experiment | 6,656 train / 832 held-out rows |
+| Generator defaults | 260,000 train / 1,300 held-out rows |
+| Workflow | one JSON object with an ordered `actions` array |
+| Reward | `resolved_subfaults / total_subfaults`; exact success tracked separately |
+| Curriculum version | 5 |

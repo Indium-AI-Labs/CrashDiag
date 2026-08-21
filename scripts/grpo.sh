@@ -41,12 +41,13 @@ if [[ "${1:-}" != "--inside-screen" ]]; then
 fi
 
 cd "${REPO_ROOT}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Missing ${ENV_FILE}" >&2
   exit 1
 fi
 
-# Keep the environment in the caller's shell and let grpo_final.py load the
+# Keep the environment in the caller's shell and let the pipeline module load the
 # same root env.txt. Do not print the token or any secret values.
 export CRASHDIAG_ENV_FILE="${ENV_FILE}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
@@ -66,7 +67,10 @@ python3 -m pip install -e ".[train]"
 
 echo "Starting GRPO and final evaluation..."
 echo "completion_limit=${CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH} eval_limit=${CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS} strict_json_reward=1 dataloader_workers=${CRASHDIAG_GRPO_DATALOADER_WORKERS} prefetch=${CRASHDIAG_GRPO_DATALOADER_PREFETCH}"
-python3 -u "${REPO_ROOT}/grpo/grpo_final.py" 2>&1 | tee -a "${LOG_FILE}"
-status=${PIPESTATUS[0]}
+if python3 -u -m training.grpo_pipeline; then
+  status=0
+else
+  status=$?
+fi
 echo "GRPO process exited with status ${status}"
 exit "${status}"

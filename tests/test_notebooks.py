@@ -1,4 +1,4 @@
-"""Static safety checks for the multi-model Qwen2.5 notebook workflow."""
+"""Static safety checks for the maintained Qwen2.5 notebook workflow."""
 
 from __future__ import annotations
 
@@ -57,7 +57,8 @@ class ModelNotebookTests(unittest.TestCase):
                 source = _source(model_dir / name)
                 self.assertIn(f'BASE_MODEL = "{expected_base}"', source)
                 self.assertIn(f'MODEL_SLUG = "{slug}"', source)
-                self.assertIn('BUCKET_ID = "devaanshpa/CrashDiag"', source)
+                self.assertIn("CRASHDIAG_HF_BUCKET_ID", source)
+                self.assertIn('"devaanshpa/CrashDiag"', source)
                 self.assertIn("CRASHDIAG_DATASET_RUN_ID", source)
                 self.assertIn("CRASHDIAG_ENV_FILE", source)
                 if name in {"grpo.ipynb", "eval_grpo.ipynb", "eval_base.ipynb"}:
@@ -84,11 +85,27 @@ class ModelNotebookTests(unittest.TestCase):
             grpo = _source(NOTEBOOK_ROOT / slug / "grpo.ipynb")
             self.assertIn("'--train-file', str(DATASET_DIR / TRAIN_FILE)", grpo)
             self.assertIn("'--eval-file', str(DATASET_DIR / EVAL_FILE)", grpo)
-            self.assertIn("'--num-generations', '2'", grpo)
+            self.assertIn(
+                "os.environ.get('CRASHDIAG_GRPO_NUM_GENERATIONS', '4')",
+                grpo,
+            )
+            self.assertIn("'--max-completion-length'", grpo)
+            self.assertIn("'--strict-json-only-reward'", grpo)
             self.assertIn("'--no-load-in-4bit'", grpo)
             self.assertIn("directly from the base model", grpo)
             self.assertIn("TRAIN_FILE, EVAL_FILE = 'grpo_train.jsonl', 'grpo_eval.jsonl'", grpo)
             self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
+
+    def test_standalone_evaluations_are_prompt_matched(self) -> None:
+        base = _source(NOTEBOOK_ROOT / "qwen2.5_3b" / "eval_base.ipynb")
+        adapter = _source(NOTEBOOK_ROOT / "qwen2.5_3b" / "eval_grpo.ipynb")
+        self.assertIn("--no-few-shot", base)
+        self.assertIn("--no-few-shot", adapter)
+        self.assertIn("CRASHDIAG_BASE_EVAL_MAX_NEW_TOKENS", base)
+        self.assertIn(
+            "CRASHDIAG_BASE_EVAL_MAX_NEW_TOKENS",
+            _source(NOTEBOOK_ROOT / "qwen2.5_3b" / "run_all.ipynb"),
+        )
 
     def test_evaluation_has_few_shot_prompting(self) -> None:
         from training.evaluate_jsonl import FEW_SHOT_MESSAGES, few_shot_prompt, SYSTEM_PROMPT

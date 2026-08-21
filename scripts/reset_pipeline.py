@@ -1,13 +1,12 @@
-"""Reset local artifacts/data and the private HF storage bucket.
+"""Reset local artifacts/data and, optionally, an explicitly named HF bucket.
 
-Use before starting a fresh Qwen3-14B run.  This is destructive:
+This is destructive and requires ``--yes``:
 - deletes local data/, outputs/, artifacts/, scratchpad contents
-- deletes the HF storage bucket named by CRASHDIAG_HF_BUCKET_ID
-  (defaults to devaanshpa/CrashDiag) and recreates it as private so
-  subsequent uploads work.
+- when ``--bucket-id`` is supplied, deletes that HF storage bucket and
+  recreates it as private so subsequent uploads work.
 
-The script reads HF_TOKEN from .env (or CRASHDIAG_ENV_FILE).  It refuses to
-run without a confirmed token.
+Remote reset reads HF_TOKEN from .env (or CRASHDIAG_ENV_FILE). Local-only reset
+uses ``--skip-bucket`` and does not require Hugging Face credentials.
 """
 
 from __future__ import annotations
@@ -74,20 +73,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--bucket-id",
-        default=os.environ.get("CRASHDIAG_HF_BUCKET_ID", "devaanshpa/CrashDiag"),
-        help="HF storage bucket to clear (default: devaanshpa/CrashDiag)",
+        help="exact HF storage bucket to delete and recreate",
     )
     parser.add_argument(
         "--skip-bucket",
         action="store_true",
         help="only clear local data/outputs/artifacts, leave the HF bucket alone",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm deletion of the displayed local and remote targets",
+    )
     args = parser.parse_args()
 
-    load_env_file()
-    token = os.environ.get("HF_TOKEN", "").strip()
-    if not token:
-        raise SystemExit("HF_TOKEN not set; add it to .env first")
+    if not args.yes:
+        raise SystemExit("Refusing destructive reset without explicit --yes")
+
+    token = ""
+    if not args.skip_bucket:
+        if not args.bucket_id:
+            raise SystemExit("Remote reset requires explicit --bucket-id")
+        load_env_file()
+        token = os.environ.get("HF_TOKEN", "").strip()
+        if not token:
+            raise SystemExit("HF_TOKEN not set; add it to .env first")
 
     reset_local()
     if not args.skip_bucket:

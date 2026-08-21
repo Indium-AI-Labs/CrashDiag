@@ -1,20 +1,13 @@
-"""Run direct GRPO over SSH with a persistent screen session.
+"""Run the direct-GRPO training and standalone-evaluation pipeline.
 
-Recommended remote workflow:
+The persistent ``screen`` wrapper is ``scripts/grpo.sh``. This module can also
+be invoked directly after installing the training dependencies:
 
-    cd /path/to/CrashDiag/grpo
-    screen -S crashdiag-grpo
-    python -u grpo_final.py 2>&1 | tee grpo_final.log
-    # Detach without stopping: press Ctrl-A, then D
+    python -m training.grpo_pipeline
 
-Reconnect and monitor:
-
-    screen -ls
-    screen -r crashdiag-grpo
-    tail -f grpo_final.log
-
-If the SSH connection drops, the screen session and training continue.
-The script expects env.txt beside this file. It does not run SFT.
+The pipeline reads ``env.txt`` from the repository root unless
+``CRASHDIAG_ENV_FILE`` overrides it. It starts from Qwen2.5-3B-Instruct and
+does not run or require SFT.
 """
 
 from __future__ import annotations
@@ -29,7 +22,8 @@ from zoneinfo import ZoneInfo
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-ENV_FILE = Path(os.environ.get("CRASHDIAG_ENV_FILE", SCRIPT_DIR / "env.txt"))
+ENV_FILE = Path(os.environ.get("CRASHDIAG_ENV_FILE", REPO_ROOT / "env.txt"))
+_SENSITIVE_FLAGS = frozenset({"--api-key", "--sandbox-token", "--token"})
 if not ENV_FILE.is_absolute():
     ENV_FILE = (SCRIPT_DIR / ENV_FILE).resolve()
 
@@ -38,7 +32,7 @@ def load_env_file(path: Path) -> None:
     """Load simple KEY=VALUE settings without overwriting shell variables."""
 
     if not path.is_file():
-        raise RuntimeError(f"Missing {path}; copy env.txt beside grpo_final.py")
+        raise RuntimeError(f"Missing {path}; create env.txt at the repository root")
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -52,8 +46,30 @@ def ist_run_id(stage: str) -> str:
     return f"{stamp}-qwen2.5_3b-{stage}"
 
 
+def _redacted_command(command: list[str]) -> list[str]:
+    """Return a display-safe copy of a subprocess argument vector."""
+
+    redacted: list[str] = []
+    hide_next = False
+    for argument in command:
+        if hide_next:
+            redacted.append("<redacted>")
+            hide_next = False
+            continue
+        if argument in _SENSITIVE_FLAGS:
+            redacted.append(argument)
+            hide_next = True
+            continue
+        flag, separator, _value = argument.partition("=")
+        if separator and flag in _SENSITIVE_FLAGS:
+            redacted.append(f"{flag}=<redacted>")
+            continue
+        redacted.append(argument)
+    return redacted
+
+
 def run(command: list[str]) -> None:
-    print("$ " + " ".join(command), flush=True)
+    print("$ " + " ".join(_redacted_command(command)), flush=True)
     subprocess.run(command, cwd=REPO_ROOT, check=True)
 
 
@@ -64,10 +80,10 @@ def main() -> int:
 
     dataset_run_id = os.environ.get("CRASHDIAG_DATASET_RUN_ID", "").strip()
     if not dataset_run_id:
-        raise RuntimeError("Set CRASHDIAG_DATASET_RUN_ID in grpo/env.txt")
+        raise RuntimeError("Set CRASHDIAG_DATASET_RUN_ID in env.txt")
     hf_token = os.environ.get("HF_TOKEN", "").strip()
     if not hf_token:
-        raise RuntimeError("Set HF_TOKEN in grpo/env.txt")
+        raise RuntimeError("Set HF_TOKEN in env.txt")
     sandbox_url = os.environ.get("CRASHDIAG_SANDBOX_URL", "").strip()
     sandbox_token = (
         os.environ.get("CRASHDIAG_API_TOKEN", "").strip()
@@ -76,10 +92,12 @@ def main() -> int:
     if not sandbox_url or not sandbox_token:
         raise RuntimeError(
             "Set CRASHDIAG_SANDBOX_URL and CRASHDIAG_SANDBOX_TOKEN "
-            "(or CRASHDIAG_API_TOKEN) in grpo/env.txt"
+            "(or CRASHDIAG_API_TOKEN) in env.txt"
         )
 
-    bucket_id = os.environ.get("CRASHDIAG_HF_BUCKET_ID", "devaanshpa/CrashDiag")
+    bucket_id = os.environ.get("CRASHDIAG_HF_BUCKET_ID", "").strip()
+    if not bucket_id:
+        raise RuntimeError("Set CRASHDIAG_HF_BUCKET_ID in env.txt")
     grpo_run_id = os.environ.get("CRASHDIAG_GRPO_RUN_ID", "").strip() or ist_run_id("grpo")
     eval_run_id = (
         os.environ.get("CRASHDIAG_GRPO_EVAL_RUN_ID", "").strip()
@@ -202,8 +220,6 @@ def main() -> int:
             "grpo",
             "--sandbox-url",
             sandbox_url,
-            "--sandbox-token",
-            sandbox_token,
         ]
     )
 
@@ -225,8 +241,6 @@ def main() -> int:
             eval_max_new_tokens,
             "--sandbox-url",
             sandbox_url,
-            "--sandbox-token",
-            sandbox_token,
             "--artifact-bucket",
             bucket_id,
             "--run-id",
