@@ -1,7 +1,7 @@
 # CrashDiag
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://github.com/Indium-AI-Labs/CrashDiag/blob/main/pyproject.toml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](LICENSE)
 [![CI](https://github.com/Indium-AI-Labs/CrashDiag/actions/workflows/ci.yml/badge.svg)](https://github.com/Indium-AI-Labs/CrashDiag/actions/workflows/ci.yml)
 [![Hugging Face model](https://img.shields.io/badge/%F0%9F%A4%97-model-CrashDiag--Qwen2.5--3B--GRPO-yellow)](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO)
 
@@ -182,4 +182,9 @@ before adapting the system to real infrastructure.
 
 ## License
 
-CrashDiag is released under the [MIT License](LICENSE).
+CrashDiag is licensed under the [Creative Commons Attribution 4.0 International
+License (CC BY 4.0)](LICENSE).
+
+Copyright © 2026 Indium AI Labs. When sharing or adapting the project, credit
+“CrashDiag contributors, Indium AI Labs,” link to this repository and the
+license, and indicate whether changes were made.

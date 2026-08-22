@@ -2,7 +2,7 @@
 base_model: Qwen/Qwen2.5-3B-Instruct
 library_name: peft
 pipeline_tag: text-generation
-license: mit
+license: cc-by-4.0
 language:
 - en
 tags:
