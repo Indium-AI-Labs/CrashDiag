@@ -1,4 +1,4 @@
-"""Fresh-start a new v5 run: clear everything, then regenerate the v5
+"""Fresh-start a new v6 run: clear everything, then regenerate the v6
 (SFT + GRPO) dataset and upload it as ONE fresh `datasets` stage.
 
 Run with the .env loaded (HF_TOKEN, CRASHDIAG_SANDBOX_URL, CRASHDIAG_API_TOKEN).
@@ -8,9 +8,9 @@ Usage:
   # prints the new CRASHDIAG_DATASET_RUN_ID to use in the notebooks
 
 The generated files land in data/:
-  sft_train.jsonl / sft_eval.jsonl   (v5, with multi-action completions)
-  grpo_train.jsonl / grpo_eval.jsonl (v5, answer-free)
-  grpo_summary.json                  (v5 summary)
+  sft_train.jsonl / sft_eval.jsonl   (v6, with multi-action completions)
+  grpo_train.jsonl / grpo_eval.jsonl (v6, answer-free)
+  grpo_summary.json                  (v6 summary)
 """
 
 from __future__ import annotations
@@ -24,6 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from training.hard_scenarios import (
+    HARD_CURRICULUM_VERSION,
+    HARD_SCENARIO_SCHEMA_VERSION,
+)
 
 def _automatic_run_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -42,13 +49,13 @@ def main() -> int:
         "--train-samples-per-fault",
         type=int,
         default=5000,
-        help="v5 training variations per workflow (default 5000)",
+        help="v6 training variations per workflow (default 5000)",
     )
     parser.add_argument(
         "--eval-samples-per-fault",
         type=int,
         default=25,
-        help="v5 evaluation variations per workflow (default 25)",
+        help="v6 evaluation variations per workflow (default 25)",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-id", default=None, help="explicit run ID")
@@ -93,7 +100,7 @@ def main() -> int:
         eval_samples_per_fault=args.eval_samples_per_fault,
         seed=args.seed,
     )
-    print("wrote v5 SFT + GRPO datasets")
+    print("wrote integrity-checked v6 SFT + GRPO datasets")
 
     from training.artifacts import (
         ArtifactConfig,
@@ -123,8 +130,8 @@ def main() -> int:
             "seed": args.seed,
             "train_samples_per_fault": args.train_samples_per_fault,
             "eval_samples_per_fault": args.eval_samples_per_fault,
-            "schema_version": 5,
-            "curriculum_version": 5,
+            "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+            "curriculum_version": HARD_CURRICULUM_VERSION,
         },
     )
     uploader.upload_files(
@@ -141,7 +148,7 @@ def main() -> int:
             "seed": args.seed,
             "mechanically_validated": True,
             "grpo_targets_included": False,
-            "curricula": ["v5"],
+            "curricula": [f"v{HARD_CURRICULUM_VERSION}"],
         },
     )
     uploader.complete_run({"stages": ["datasets"]})

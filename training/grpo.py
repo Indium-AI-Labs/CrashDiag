@@ -37,7 +37,7 @@ from .hard_scenarios import (
     hard_observation_messages,
     hard_observation_workflow_messages,
     prepare_hard_scenario,
-    prepare_v5_scenario,
+    prepare_v6_scenario,
 )
 from .reporting import ReportBundle, generate_trainer_report
 from .qlora import cast_trainable_parameters_to_fp32, prepare_4bit_qlora_model
@@ -276,8 +276,8 @@ def mechanical_reward(
                 expected_prompt = observation_messages(sandbox.observe())
             elif version == HARD_SCENARIO_SCHEMA_VERSION:
                 if not isinstance(profile, str):
-                    raise TypeError("schema-v5 scenarios require scenario_profile")
-                fault, _, _ = prepare_v5_scenario(
+                    raise TypeError("schema-v6 scenarios require scenario_profile")
+                fault, _, _ = prepare_v6_scenario(
                     str(name),
                     scenario_seed,
                     profile,
@@ -406,7 +406,7 @@ def validate_grpo_dataset(dataset: Any, label: str = "GRPO dataset") -> None:
         )
     if HARD_SCENARIO_SCHEMA_VERSION in versions:
         if "scenario_profile" not in columns:
-            raise SystemExit(f"{label} schema-v5 rows require scenario_profile")
+            raise SystemExit(f"{label} schema-v6 rows require scenario_profile")
         profiles = list(dataset["scenario_profile"])
         invalid_profiles = sorted(
             {

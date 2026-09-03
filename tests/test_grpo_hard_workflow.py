@@ -23,13 +23,13 @@ from training.calibrate_grpo import (
 from training.common import WORKFLOW_NAMES
 from training.evaluate_jsonl import summarize_results
 from training.grpo_gates import promotion_gate, smoke_gate
-from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_v5_records
+from training.hard_scenarios import HARD_SCENARIO_PROFILES, generate_v6_records
 from training.grpo import main as grpo_main
 
 
 class CalibrationTests(unittest.TestCase):
     def test_signed_rollout_replay_ignores_recorded_rewards(self) -> None:
-        rows = generate_v5_records(
+        rows = generate_v6_records(
             samples_per_fault=3, seed=17, start_variation=0, split="train"
         )
         selected = select_calibration_rows(rows, prompts_per_fault_profile=1)
@@ -151,7 +151,7 @@ class CalibrationTests(unittest.TestCase):
             self.assertTrue((root / "smoke/reports/smoke_gate.json").is_file())
 
     def test_calibration_slice_is_exactly_stratified(self) -> None:
-        rows = generate_v5_records(
+        rows = generate_v6_records(
             samples_per_fault=9, seed=12, start_variation=0, split="train"
         )
         selected = select_calibration_rows(rows, prompts_per_fault_profile=2)
@@ -208,7 +208,7 @@ class CalibrationTests(unittest.TestCase):
         self.assertFalse(result["gates"]["positive_reward_all_fault_families"])
 
     def test_calibration_scores_each_generation_concurrently(self) -> None:
-        rows = generate_v5_records(
+        rows = generate_v6_records(
             samples_per_fault=6, seed=31, start_variation=0, split="train"
         )
         lock = threading.Lock()

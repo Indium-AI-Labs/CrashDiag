@@ -43,13 +43,15 @@ from .common import (
     write_jsonl,
 )
 from .hard_scenarios import (
+    HARD_CURRICULUM_VERSION,
+    HARD_SCENARIO_SCHEMA_VERSION,
     HARD_SCENARIO_PROFILES,
     hard_expert_workflow,
-    prepare_v5_scenario,
+    prepare_v6_scenario,
 )
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = HARD_SCENARIO_SCHEMA_VERSION
 DEFAULT_TRAIN_SAMPLES_PER_FAULT = 5000
 DEFAULT_EVAL_SAMPLES_PER_FAULT = 25
 # Eval variations start at a fixed high offset so shrinking the train set does
@@ -148,7 +150,7 @@ def prepare_scenario(
     if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
         raise TypeError("scenario_seed must be an integer")
     profile = HARD_SCENARIO_PROFILES[scenario_seed % len(HARD_SCENARIO_PROFILES)]
-    return prepare_v5_scenario(
+    return prepare_v6_scenario(
         fault_name,
         scenario_seed,
         profile,
@@ -157,7 +159,7 @@ def prepare_scenario(
 
 
 def expert_workflow(fault_name: str) -> dict[str, Any]:
-    """Return the ordered multi-action repair proved by the v5 scenario."""
+    """Return the ordered multi-action repair proved by the v6 scenario."""
 
     return hard_expert_workflow(fault_name)
 
@@ -214,14 +216,14 @@ def build_validated_sample(
         "sample_seed": current_seed,
         "variation_index": variation_index,
         "scenario_schema_version": SCHEMA_VERSION,
-        "curriculum_version": SCHEMA_VERSION,
+        "curriculum_version": HARD_CURRICULUM_VERSION,
         "scenario_profile": HARD_SCENARIO_PROFILES[
             current_seed % len(HARD_SCENARIO_PROFILES)
         ],
         "prompt": observation_messages(observation, workflow_name=workflow.name),
         "metadata": {
             "schema_version": SCHEMA_VERSION,
-            "curriculum_version": SCHEMA_VERSION,
+            "curriculum_version": HARD_CURRICULUM_VERSION,
             "mechanically_validated": True,
             "split": split,
             "variation_index": variation_index,
@@ -365,9 +367,9 @@ def generate_datasets(
 
     summary: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "curriculum_version": SCHEMA_VERSION,
+        "curriculum_version": HARD_CURRICULUM_VERSION,
         "action_contract": "multi_action_workflows",
-        "curriculum": "v5",
+        "curriculum": f"v{HARD_CURRICULUM_VERSION}",
         "seed": seed,
         "mechanically_validated": True,
         "targets_included": False,
@@ -492,6 +494,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "eval_rows": counts["eval"],
                     "mechanically_validated": True,
                     "grpo_targets_included": False,
+                    "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+                    "curriculum_version": HARD_CURRICULUM_VERSION,
                 },
             )
     except (ArtifactError, TypeError, ValueError, RuntimeError) as exc:

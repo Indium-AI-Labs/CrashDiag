@@ -16,7 +16,7 @@ from training.grpo import (
 from training.generate_dataset import generate_records, prepare_scenario, sample_seed
 from training.hard_scenarios import (
     HARD_SCENARIO_PROFILES,
-    build_v5_sample,
+    build_v6_sample,
     hard_expert_workflow,
 )
 
@@ -71,13 +71,13 @@ class MechanicalRewardTests(unittest.TestCase):
 
         self.assertEqual(rewards, [1.0] * len(WORKFLOWS))
 
-    def test_schema_v5_replays_every_task_and_profile(self) -> None:
+    def test_schema_v6_replays_every_task_and_profile(self) -> None:
         rows = []
         completions = []
         for profile_index, profile in enumerate(HARD_SCENARIO_PROFILES):
             for fault_index, fault_name in enumerate(WORKFLOWS):
                 variation = profile_index + 3 * fault_index
-                row = build_v5_sample(
+                row = build_v6_sample(
                     fault_name,
                     base_seed=81,
                     variation_index=variation,
@@ -100,7 +100,7 @@ class MechanicalRewardTests(unittest.TestCase):
         self.assertEqual(rewards, [1.0] * len(rows))
 
     def test_dependency_repair_ignores_a_model_guessed_version(self) -> None:
-        row = build_v5_sample(
+        row = build_v6_sample(
             "dependency_mismatch",
             base_seed=81,
             variation_index=1,
@@ -124,8 +124,8 @@ class MechanicalRewardTests(unittest.TestCase):
 
         self.assertEqual(rewards, [1.0])
 
-    def test_schema_v5_prompt_profile_and_version_fail_closed(self) -> None:
-        row = build_v5_sample(
+    def test_schema_v6_prompt_profile_and_version_fail_closed(self) -> None:
+        row = build_v6_sample(
             "disk_full", base_seed=44, variation_index=2, split="eval"
         )
         completion = _workflow_completion("disk_full")

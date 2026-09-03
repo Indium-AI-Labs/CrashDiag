@@ -344,18 +344,18 @@ class HttpSandbox(SandboxBackend):
             )
         return result
 
-    def prepare_v5_scenario(
+    def prepare_v6_scenario(
         self,
         fault_name: str,
         sample_seed: int,
         scenario_profile: str,
     ) -> dict[str, Any]:
-        """Prepare v5 workflow state in one authenticated setup request."""
+        """Prepare integrity-checked v6 workflow state atomically."""
 
         try:
             result = self._request(
                 "POST",
-                f"{self._current_session_path()}/scenarios/v5",
+                f"{self._current_session_path()}/scenarios/v6",
                 {
                     "fault_name": fault_name,
                     "sample_seed": sample_seed,
@@ -364,15 +364,16 @@ class HttpSandbox(SandboxBackend):
             )
         except SandboxHTTPError as exc:
             if exc.status == 404:
-                raise NotImplementedError(
-                    "remote sandbox does not support atomic v5 scenarios"
+                raise SandboxTransportError(
+                    "remote sandbox does not support schema-v6 scenarios; "
+                    "deploy the current CrashDiag sandbox before training"
                 ) from exc
             raise
         observation = result.get("observation")
         health = result.get("health")
         if not isinstance(observation, dict) or not isinstance(health, dict):
             raise SandboxTransportError(
-                "v5-scenario response has no observation/health objects"
+                "v6-scenario response has no observation/health objects"
             )
         return result
 

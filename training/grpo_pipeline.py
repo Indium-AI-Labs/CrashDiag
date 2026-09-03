@@ -12,12 +12,16 @@ does not run or require SFT.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from urllib import request
 from zoneinfo import ZoneInfo
+
+from .hard_scenarios import HARD_CURRICULUM_VERSION, HARD_SCENARIO_SCHEMA_VERSION
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -73,6 +77,54 @@ def run(command: list[str]) -> None:
     subprocess.run(command, cwd=REPO_ROOT, check=True)
 
 
+def require_current_dataset(path: Path) -> None:
+    """Reject stale or mixed dataset artifacts before allocating a GPU."""
+
+    rows = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            if not raw_line.strip():
+                continue
+            try:
+                row = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"{path}:{line_number} is not valid JSON") from exc
+            if not isinstance(row, dict):
+                raise RuntimeError(f"{path}:{line_number} must contain a JSON object")
+            if row.get("scenario_schema_version") != HARD_SCENARIO_SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"{path}:{line_number} uses scenario schema "
+                    f"{row.get('scenario_schema_version')!r}; regenerate schema "
+                    f"v{HARD_SCENARIO_SCHEMA_VERSION} datasets before training"
+                )
+            if row.get("curriculum_version") != HARD_CURRICULUM_VERSION:
+                raise RuntimeError(
+                    f"{path}:{line_number} uses curriculum "
+                    f"{row.get('curriculum_version')!r}; expected "
+                    f"v{HARD_CURRICULUM_VERSION}"
+                )
+            rows += 1
+    if rows == 0:
+        raise RuntimeError(f"{path} contains no dataset rows")
+
+
+def require_current_sandbox(sandbox_url: str) -> None:
+    """Fail before training when the remote verifier lacks schema v6."""
+
+    health_url = sandbox_url.rstrip("/") + "/healthz"
+    try:
+        with request.urlopen(health_url, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"could not verify sandbox version at {health_url}") from exc
+    versions = payload.get("scenario_schema_versions") if isinstance(payload, dict) else None
+    if not isinstance(versions, list) or HARD_SCENARIO_SCHEMA_VERSION not in versions:
+        raise RuntimeError(
+            f"sandbox does not advertise scenario schema v{HARD_SCENARIO_SCHEMA_VERSION}; "
+            "deploy the current CrashDiag sandbox before training"
+        )
+
+
 def main() -> int:
     load_env_file(ENV_FILE)
     os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
@@ -94,6 +146,7 @@ def main() -> int:
             "Set CRASHDIAG_SANDBOX_URL and CRASHDIAG_SANDBOX_TOKEN "
             "(or CRASHDIAG_API_TOKEN) in env.txt"
         )
+    require_current_sandbox(sandbox_url)
 
     bucket_id = os.environ.get("CRASHDIAG_HF_BUCKET_ID", "").strip()
     if not bucket_id:
@@ -147,6 +200,8 @@ def main() -> int:
     eval_file = dataset_dir / "grpo_eval.jsonl"
     if not train_file.is_file() or not eval_file.is_file():
         raise RuntimeError(f"Dataset stage is missing {train_file} or {eval_file}")
+    require_current_dataset(train_file)
+    require_current_dataset(eval_file)
 
     run(
         [

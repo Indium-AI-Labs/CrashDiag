@@ -1,4 +1,4 @@
-# CrashDiag v5 notebook workflow
+# CrashDiag v6 notebook workflow
 
 The maintained notebooks use one model, `Qwen/Qwen2.5-3B-Instruct`, and train
 directly with GRPO. No SFT checkpoint or `CRASHDIAG_SFT_RUN_ID` is required.

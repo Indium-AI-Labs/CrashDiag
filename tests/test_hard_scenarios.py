@@ -1,4 +1,4 @@
-"""Schema-v5 workflow-scenario determinism and mechanical-solvability tests."""
+"""Schema-v6 workflow-scenario determinism and mechanical-solvability tests."""
 
 from __future__ import annotations
 
@@ -10,22 +10,40 @@ from crashdiag.faults.workflows import WORKFLOWS
 from training.hard_scenarios import (
     HARD_CURRICULUM_VERSION,
     HARD_SCENARIO_PROFILES,
-    build_v5_sample,
-    generate_v5_records,
+    build_v6_sample,
+    generate_v6_records,
     hard_expert_workflow,
     hard_observation_workflow_messages,
     hard_sample_seed,
-    prepare_v5_scenario,
+    prepare_v6_scenario,
 )
 
 
 class HardScenarioTests(unittest.TestCase):
+    def test_no_active_subfault_is_resolved_before_policy_inference(self) -> None:
+        """Scenario history must not perform any part of the target repair."""
+
+        for profile_index, profile in enumerate(HARD_SCENARIO_PROFILES):
+            for fault_name in WORKFLOWS:
+                with self.subTest(profile=profile, workflow=fault_name):
+                    seed = hard_sample_seed(42, fault_name, profile_index)
+                    workflow, sandbox, _ = prepare_v6_scenario(
+                        fault_name,
+                        seed,
+                        profile,
+                    )
+                    self.assertEqual(
+                        workflow.resolved_subfault_count(sandbox),
+                        0,
+                        "an active sub-fault was repaired before policy inference",
+                    )
+
     def test_every_profile_and_workflow_is_solvable_with_ordered_actions(self) -> None:
         for profile_index, profile in enumerate(HARD_SCENARIO_PROFILES):
             for fault_name in WORKFLOWS:
                 with self.subTest(profile=profile, workflow=fault_name):
                     seed = hard_sample_seed(42, fault_name, profile_index)
-                    workflow, sandbox, _ = prepare_v5_scenario(
+                    workflow, sandbox, _ = prepare_v6_scenario(
                         fault_name,
                         seed,
                         profile,
@@ -55,19 +73,19 @@ class HardScenarioTests(unittest.TestCase):
                     self.assertTrue(sandbox.health_check()["healthy"])
 
     def test_generation_is_answer_free_deterministic_balanced_and_disjoint(self) -> None:
-        first = generate_v5_records(
+        first = generate_v6_records(
             samples_per_fault=6,
             seed=42,
             start_variation=0,
             split="train",
         )
-        second = generate_v5_records(
+        second = generate_v6_records(
             samples_per_fault=6,
             seed=42,
             start_variation=0,
             split="train",
         )
-        evaluation = generate_v5_records(
+        evaluation = generate_v6_records(
             samples_per_fault=3,
             seed=42,
             start_variation=6,
@@ -92,7 +110,7 @@ class HardScenarioTests(unittest.TestCase):
             self.assertNotIn('"completion"', serialized)
             self.assertNotIn('"answer"', serialized)
             self.assertNotIn('"target"', serialized)
-            self.assertEqual(row["scenario_schema_version"], 5)
+            self.assertEqual(row["scenario_schema_version"], 6)
             self.assertEqual(row["curriculum_version"], HARD_CURRICULUM_VERSION)
             self.assertEqual(
                 row["metadata"]["curriculum_version"],
@@ -104,7 +122,7 @@ class HardScenarioTests(unittest.TestCase):
         observations = []
         for variation in range(6):
             seed = hard_sample_seed(9, "port_proxy_misconfig", variation)
-            _, sandbox, _ = prepare_v5_scenario(
+            _, sandbox, _ = prepare_v6_scenario(
                 "port_proxy_misconfig",
                 seed,
                 "shifted_noisy",
@@ -117,7 +135,7 @@ class HardScenarioTests(unittest.TestCase):
 
     def test_build_sample_profile_follows_variation(self) -> None:
         rows = [
-            build_v5_sample(
+            build_v6_sample(
                 "oom_kill",
                 base_seed=42,
                 variation_index=index,

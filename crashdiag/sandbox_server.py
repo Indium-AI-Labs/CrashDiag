@@ -298,7 +298,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                     {
                         "status": "ok",
                         "service": "crashdiag-sandbox",
-                        "scenario_schema_versions": [1, 3, 4, 5],
+                        "scenario_schema_versions": [1, 3, 4, 6],
                         "hard_scenario_batch": True,
                         "workflow_scenario_batch": True,
                         "sessions": self.sandbox_server.sessions.stats(),
@@ -448,13 +448,14 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                     "fault": fault_name,
                     "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
                     "scenario_profile": scenario_profile,
+                    "integrity": {"pre_policy_resolved_subfaults": []},
                     "observation": observation,
                     "health": health,
                 },
             )
             return
 
-        if len(segments) == 5 and segments[3:] == ["scenarios", "v5"]:
+        if len(segments) == 5 and segments[3:] == ["scenarios", "v6"]:
             if method != "POST":
                 raise APIError(405, "method_not_allowed", "method not allowed")
             payload = self._read_json_object()
@@ -463,7 +464,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                 raise APIError(
                     400,
                     "invalid_request",
-                    "v5 scenario requires fault_name, sample_seed, and scenario_profile",
+                    "v6 scenario requires fault_name, sample_seed, and scenario_profile",
                 )
             fault_name = payload["fault_name"]
             scenario_seed = payload["sample_seed"]
@@ -471,11 +472,11 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
             from training.hard_scenarios import (
                 HARD_SCENARIO_PROFILES,
                 HARD_SCENARIO_SCHEMA_VERSION,
-                prepare_v5_scenario,
+                prepare_v6_scenario,
             )
 
             if scenario_profile not in HARD_SCENARIO_PROFILES:
-                raise APIError(400, "invalid_request", "unknown v5 scenario profile")
+                raise APIError(400, "invalid_request", "unknown v6 scenario profile")
             if (
                 isinstance(scenario_seed, bool)
                 or not isinstance(scenario_seed, int)
@@ -490,15 +491,15 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
             from crashdiag.faults.workflows import workflow_for_name
 
             if not isinstance(fault_name, str):
-                raise APIError(400, "invalid_request", "unknown v5 scenario fault")
+                raise APIError(400, "invalid_request", "unknown v6 scenario fault")
             try:
                 workflow_for_name(fault_name)
             except ValueError:
-                raise APIError(400, "invalid_request", "unknown v5 scenario fault")
+                raise APIError(400, "invalid_request", "unknown v6 scenario fault")
             with self.sandbox_server.sessions.lease(
                 session_id, count_operation=True
             ) as session:
-                prepare_v5_scenario(
+                prepare_v6_scenario(
                     fault_name,
                     scenario_seed,
                     scenario_profile,
@@ -512,6 +513,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                     "fault": fault_name,
                     "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
                     "scenario_profile": scenario_profile,
+                    "integrity": {"pre_policy_resolved_subfaults": []},
                     "observation": observation,
                     "health": health,
                 },

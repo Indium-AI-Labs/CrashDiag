@@ -1,6 +1,6 @@
-# CrashDiag v5 Task Catalog
+# CrashDiag v6 Task Catalog
 
-The v5 curriculum has **52 tasks**. Each task injects one or more *sub-faults* and is
+The v6 curriculum has **52 tasks**. Each task injects one or more *sub-faults* and is
 resolved by an **ordered multi-action workflow**. Resolution is mechanical: every
 sub-fault must return to its healthy state and the sandbox must report `healthy: true`.
 

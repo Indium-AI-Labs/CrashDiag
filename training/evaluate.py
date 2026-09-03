@@ -306,7 +306,7 @@ def run_evaluation(
     faults: Iterable[Any] | None = None,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """Run workflow episodes for every v5 task and return a JSON-safe report.
+    """Run workflow episodes for every current task and return a JSON-safe report.
 
     A fresh sandbox is constructed for every repetition.  The orchestrator's step
     limit is the workflow's sub-fault count, and its verifier derives ``resolved``

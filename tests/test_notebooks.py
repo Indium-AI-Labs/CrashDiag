@@ -80,7 +80,7 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertNotIn("SFT_RUN_ID", source)
             self.assertIn("CRASHDIAG_ENV_FILE", source)
 
-    def test_grpo_trains_and_evaluates_v5_curriculum_by_default(self) -> None:
+    def test_grpo_trains_and_evaluates_v6_curriculum_by_default(self) -> None:
         for slug in PER_MODEL:
             grpo = _source(NOTEBOOK_ROOT / slug / "grpo.ipynb")
             self.assertIn("'--train-file', str(DATASET_DIR / TRAIN_FILE)", grpo)
@@ -94,6 +94,9 @@ class ModelNotebookTests(unittest.TestCase):
             self.assertIn("'--no-load-in-4bit'", grpo)
             self.assertIn("directly from the base model", grpo)
             self.assertIn("TRAIN_FILE, EVAL_FILE = 'grpo_train.jsonl', 'grpo_eval.jsonl'", grpo)
+            self.assertIn("CRASHDIAG_CURRICULUM', 'v6'", grpo)
+            self.assertIn("require_current_dataset", grpo)
+            self.assertIn("require_current_sandbox", grpo)
             self.assertIn('"--no-few-shot"', _source(NOTEBOOK_ROOT / slug / "eval_grpo.ipynb"))
 
     def test_standalone_evaluations_are_prompt_matched(self) -> None:

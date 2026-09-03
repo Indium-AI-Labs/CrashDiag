@@ -26,8 +26,8 @@ from crashdiag.faults.workflows import WORKFLOWS, workflow_for_name
 from .common import FAULT_NAMES, fault_for_name
 
 
-HARD_SCENARIO_SCHEMA_VERSION = 5
-HARD_CURRICULUM_VERSION = 5
+HARD_SCENARIO_SCHEMA_VERSION = 6
+HARD_CURRICULUM_VERSION = 6
 HARD_SCENARIO_PROFILES = ("redacted", "noisy", "shifted_noisy")
 HARD_SCENARIO_SCHEMA_VERSION_V3 = 3
 HARD_SYSTEM_PROMPT = """You diagnose a failing application from incomplete operational telemetry.
@@ -193,14 +193,7 @@ _ACTION_BY_FAULT = {
     "tls_config_misconfigured": "restore_tls_config",
 }
 
-_ALL_REPAIR_ACTIONS = tuple(
-    action for action in (
-        "restart_app", "rollback_env_var", "fix_dependency", "clear_disk", "fix_port_config",
-        "clear_cache", "renew_tls_certificate", "restore_file_permissions",
-        "apply_database_migration", "reset_database_pool", "restore_dns_configuration",
-        "restore_rate_limit_configuration",
-    )
-)
+_ALL_REPAIR_ACTIONS = tuple(dict.fromkeys(_ACTION_BY_FAULT.values()))
 
 
 def _active_fault_name(observation: Mapping[str, Any]) -> str:
@@ -421,14 +414,52 @@ def _add_real_stale_history(
 
 def _add_unsuccessful_remediation(
     sandbox: SandboxBackend,
-    active_fault_name: str,
+    active_fault: Any,
 ) -> None:
-    # This action is deliberately real and mechanically harmless.  It occurs
-    # after the active fault so recency alone cannot identify root cause.
-    if active_fault_name == "oom_kill":
-        sandbox.fix_dependency()
-    else:
-        sandbox.restart_app()
+    """Append a real repair action that cannot repair the active task.
+
+    The action is selected from the environment contract rather than from the
+    workflow's literal name.  Composite workflows may contain a sub-fault whose
+    repair action differs from the top-level workflow name, so every declared
+    active repair action must be excluded.
+    """
+
+    active_actions = set(getattr(active_fault, "actions", ()))
+    if not active_actions:
+        active_actions.add(hard_expert_action(active_fault.name)["action"])
+    try:
+        decoy_action = next(
+            action for action in _ALL_REPAIR_ACTIONS if action not in active_actions
+        )
+    except StopIteration as exc:
+        raise RuntimeError(
+            f"no state-neutral remediation is available for {active_fault.name!r}"
+        ) from exc
+    sandbox.execute_action(decoy_action, {})
+
+
+def _resolved_active_subfault_names(
+    active_fault: Any,
+    sandbox: SandboxBackend,
+) -> list[str]:
+    sub_faults = tuple(getattr(active_fault, "sub_faults", (active_fault,)))
+    return [
+        str(sub_fault.name)
+        for sub_fault in sub_faults
+        if sub_fault.local_resolved(sandbox)
+    ]
+
+
+def _assert_pre_inference_integrity(
+    active_fault: Any,
+    sandbox: SandboxBackend,
+) -> None:
+    resolved = _resolved_active_subfault_names(active_fault, sandbox)
+    if resolved:
+        raise RuntimeError(
+            f"scenario {active_fault.name!r} repaired active sub-faults before "
+            f"policy inference: {', '.join(resolved)}"
+        )
 
 
 def prepare_hard_scenario(
@@ -456,6 +487,16 @@ def prepare_hard_scenario(
         else:
             if not isinstance(prepared, Mapping):
                 raise TypeError("native hard-scenario preparation must return a mapping")
+            if prepared.get("scenario_schema_version") != HARD_SCENARIO_SCHEMA_VERSION:
+                raise RuntimeError(
+                    "remote sandbox scenario schema mismatch; deploy the current "
+                    "CrashDiag sandbox before generating or training"
+                )
+            integrity = prepared.get("integrity")
+            if not isinstance(integrity, Mapping) or integrity.get(
+                "pre_policy_resolved_subfaults"
+            ) != []:
+                raise RuntimeError("remote sandbox did not attest pre-inference integrity")
             health = prepared.get("health")
             if not isinstance(health, Mapping) or health.get("healthy") is not False:
                 raise RuntimeError(
@@ -468,8 +509,10 @@ def prepare_hard_scenario(
         _add_real_stale_history(target, fault_name, rng)
     _vary_fault(fault, target, rng)
     fault.inject(target)
+    _assert_pre_inference_integrity(fault, target)
     if profile in {"noisy", "shifted_noisy"}:
-        _add_unsuccessful_remediation(target, fault_name)
+        _add_unsuccessful_remediation(target, fault)
+    _assert_pre_inference_integrity(fault, target)
     if fault.is_resolved(target):
         raise RuntimeError(f"fault {fault_name!r} was resolved immediately after injection")
     health = target.health_check()
@@ -789,7 +832,7 @@ def hard_observation_workflow_messages(
     *,
     workflow_name: str | None = None,
 ) -> list[dict[str, str]]:
-    """Render the exact schema-v5 conversational prompt."""
+    """Render the exact workflow-curriculum conversational prompt."""
 
     content = json.dumps(
         {"observation": hard_observation_workflow(observation, workflow_name=workflow_name)},
@@ -816,14 +859,14 @@ def hard_expert_workflow(fault_name: str) -> dict[str, Any]:
     }
 
 
-def prepare_v5_scenario(
+def prepare_v6_scenario(
     fault_name: str,
     scenario_seed: int,
     scenario_profile: str,
     *,
     sandbox: SandboxBackend | None = None,
 ) -> tuple[Any, SandboxBackend, random.Random]:
-    """Reconstruct one schema-v5 workflow scenario on a local or remote sandbox."""
+    """Reconstruct one integrity-checked schema-v6 workflow scenario."""
 
     if isinstance(scenario_seed, bool) or not isinstance(scenario_seed, int):
         raise TypeError("scenario_seed must be an integer")
@@ -832,7 +875,7 @@ def prepare_v5_scenario(
     rng = random.Random(scenario_seed)
     target = sandbox if sandbox is not None else MockSandbox()
 
-    native_prepare = getattr(target, "prepare_v5_scenario", None)
+    native_prepare = getattr(target, "prepare_v6_scenario", None)
     if callable(native_prepare):
         try:
             prepared = native_prepare(fault_name, scenario_seed, profile)
@@ -840,11 +883,21 @@ def prepare_v5_scenario(
             pass
         else:
             if not isinstance(prepared, Mapping):
-                raise TypeError("native v5-scenario preparation must return a mapping")
+                raise TypeError("native v6-scenario preparation must return a mapping")
+            if prepared.get("scenario_schema_version") != HARD_SCENARIO_SCHEMA_VERSION:
+                raise RuntimeError(
+                    "remote sandbox scenario schema mismatch; deploy the current "
+                    "CrashDiag sandbox before generating or training"
+                )
+            integrity = prepared.get("integrity")
+            if not isinstance(integrity, Mapping) or integrity.get(
+                "pre_policy_resolved_subfaults"
+            ) != []:
+                raise RuntimeError("remote sandbox did not attest pre-inference integrity")
             health = prepared.get("health")
             if not isinstance(health, Mapping) or health.get("healthy") is not False:
                 raise RuntimeError(
-                    f"native v5 scenario {fault_name!r} did not become unhealthy"
+                    f"native v6 scenario {fault_name!r} did not become unhealthy"
                 )
             return workflow, target, rng
 
@@ -853,8 +906,10 @@ def prepare_v5_scenario(
     if profile in {"noisy", "shifted_noisy"}:
         _add_real_stale_history(target, fault_name, rng)
     workflow.inject(target)
+    _assert_pre_inference_integrity(workflow, target)
     if profile in {"noisy", "shifted_noisy"}:
-        _add_unsuccessful_remediation(target, fault_name)
+        _add_unsuccessful_remediation(target, workflow)
+    _assert_pre_inference_integrity(workflow, target)
     if workflow.is_resolved(target):
         raise RuntimeError(f"workflow {fault_name!r} was resolved immediately after injection")
     health = target.health_check()
@@ -863,7 +918,7 @@ def prepare_v5_scenario(
     return workflow, target, rng
 
 
-def build_v5_sample(
+def build_v6_sample(
     fault_name: str,
     *,
     base_seed: int,
@@ -876,7 +931,7 @@ def build_v5_sample(
         raise ValueError("split must be 'train' or 'eval'")
     profile = profile_for_variation(variation_index)
     scenario_seed = hard_sample_seed(base_seed, fault_name, variation_index)
-    workflow, target, _ = prepare_v5_scenario(
+    workflow, target, _ = prepare_v6_scenario(
         fault_name,
         scenario_seed,
         profile,
@@ -886,7 +941,7 @@ def build_v5_sample(
     for action in expert["actions"]:
         target.execute_action(action["action"], action["parameters"])
     if not workflow.is_resolved(target) or target.health_check().get("healthy") is not True:
-        raise RuntimeError(f"v5 expert workflow failed for {fault_name!r}")
+        raise RuntimeError(f"v6 expert workflow failed for {fault_name!r}")
     return {
         "fault_name": workflow.name,
         "difficulty": workflow.difficulty,
@@ -909,14 +964,14 @@ def build_v5_sample(
     }
 
 
-def generate_v5_records(
+def generate_v6_records(
     *,
     samples_per_fault: int,
     seed: int,
     start_variation: int,
     split: str,
 ) -> list[dict[str, Any]]:
-    """Generate balanced schema-v5 records for every workflow."""
+    """Generate balanced schema-v6 records for every workflow."""
 
     if (
         isinstance(samples_per_fault, bool)
@@ -928,7 +983,7 @@ def generate_v5_records(
     for variation_index in range(start_variation, start_variation + samples_per_fault):
         for fault_name in WORKFLOWS:
             rows.append(
-                build_v5_sample(
+                build_v6_sample(
                     fault_name,
                     base_seed=seed,
                     variation_index=variation_index,
@@ -946,9 +1001,9 @@ __all__ = [
     "HARD_SYSTEM_PROMPT",
     "_OPAQUE_SIGNATURES_V4",
     "build_hard_grpo_sample",
-    "build_v5_sample",
+    "build_v6_sample",
     "generate_hard_records",
-    "generate_v5_records",
+    "generate_v6_records",
     "hard_expert_action",
     "hard_expert_workflow",
     "hard_observation",
@@ -959,6 +1014,6 @@ __all__ = [
     "hard_observation_workflow_messages",
     "hard_sample_seed",
     "prepare_hard_scenario",
-    "prepare_v5_scenario",
+    "prepare_v6_scenario",
     "profile_for_variation",
 ]

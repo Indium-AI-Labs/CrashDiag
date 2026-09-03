@@ -216,7 +216,7 @@ def generate_hard_datasets(
         "schema_version": HARD_SCENARIO_SCHEMA_VERSION,
         "curriculum_version": HARD_CURRICULUM_VERSION,
         "action_contract": "parameter_free_repairs",
-        "curriculum": "grpo-hard-only",
+        "curriculum": "grpo-hard-only-v6",
         "seed": seed,
         "mechanically_validated": True,
         "targets_included": False,
@@ -358,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"hard GRPO dataset generation failed: {exc}") from exc
     print(
         f"wrote {summary['train']['rows']} train + {summary['eval']['rows']} eval "
-        "schema-v2 answer-free prompts"
+        "schema-v6 answer-free prompts"
     )
     print(f"  train:   {args.train_output}")
     print(f"  eval:    {args.eval_output}")

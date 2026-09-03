@@ -32,6 +32,11 @@ Project source: <https://github.com/Indium-AI-Labs/CrashDiag>
 
 ## Evaluation
 
+> **Integrity notice:** the results below were produced on schema v5 and are
+> invalidated. A noisy-history decoy could pre-resolve the `oom_kill` component
+> of 12 composite workflows before inference. The adapter is retained for audit
+> only; corrected schema-v6 results are pending a clean matched rerun.
+
 The final standalone evaluation replays the same 832 held-out v5 episodes for
 the base model and the adapter. It contains 52 fault families with 16 disjoint
 variations per family across redacted, noisy, and shifted-noisy profiles. Both
@@ -44,7 +49,7 @@ controlled ablation.
 | Policy | Exact resolution | Mean verified reward | Strict JSON | Backend errors |
 |---|---:|---:|---:|---:|
 | Qwen2.5-3B-Instruct | 1.92% (16/832) | 11.88% | 63.58% | 0.00% |
-| CrashDiag GRPO adapter | **27.40% (228/832)** | **41.91%** | **94.59%** | 0.00% |
+| CrashDiag GRPO adapter (invalidated v5 run) | 27.40% (228/832) | 41.91% | 94.59% | 0.00% |
 
 Exact resolution requires every injected subfault to be repaired. Mean verified
 reward is partial credit, `resolved_subfaults / total_subfaults`. In the raw

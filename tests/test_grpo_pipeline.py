@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from training import grpo_pipeline
+from training.hard_scenarios import HARD_CURRICULUM_VERSION, HARD_SCENARIO_SCHEMA_VERSION
 
 
 class _DatasetUploader:
@@ -23,8 +25,13 @@ class _DatasetUploader:
         if stage != "datasets":
             raise AssertionError(f"unexpected stage: {stage}")
         destination.mkdir(parents=True, exist_ok=True)
-        (destination / "grpo_train.jsonl").write_text("{}\n", encoding="utf-8")
-        (destination / "grpo_eval.jsonl").write_text("{}\n", encoding="utf-8")
+        row = {
+            "scenario_schema_version": HARD_SCENARIO_SCHEMA_VERSION,
+            "curriculum_version": HARD_CURRICULUM_VERSION,
+        }
+        payload = json.dumps(row) + "\n"
+        (destination / "grpo_train.jsonl").write_text(payload, encoding="utf-8")
+        (destination / "grpo_eval.jsonl").write_text(payload, encoding="utf-8")
 
 
 class GrpoPipelineSecurityTests(unittest.TestCase):
@@ -48,6 +55,7 @@ class GrpoPipelineSecurityTests(unittest.TestCase):
                 patch.object(grpo_pipeline, "REPO_ROOT", root),
                 patch.object(grpo_pipeline, "ENV_FILE", env_file),
                 patch.object(sys, "path", list(sys.path)),
+                patch.object(grpo_pipeline, "require_current_sandbox"),
                 patch("training.artifacts.ArtifactUploader", _DatasetUploader),
                 patch.object(
                     grpo_pipeline,
@@ -61,6 +69,19 @@ class GrpoPipelineSecurityTests(unittest.TestCase):
             for command in commands:
                 self.assertNotIn("--sandbox-token", command)
                 self.assertNotIn("sandbox-test-placeholder", command)
+
+    def test_stale_v5_dataset_is_rejected_before_training(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "grpo_train.jsonl"
+            path.write_text(
+                json.dumps(
+                    {"scenario_schema_version": 5, "curriculum_version": 5}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "regenerate schema v6"):
+                grpo_pipeline.require_current_dataset(path)
 
     def test_command_logging_redacts_sensitive_flag_values(self) -> None:
         command = ["worker", "--sandbox-token", "do-not-print", "--max-steps", "1"]

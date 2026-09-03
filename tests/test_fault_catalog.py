@@ -1,4 +1,4 @@
-"""Mechanical coverage for the v5 52-task workflow catalog."""
+"""Mechanical coverage for the 52-task workflow catalog."""
 
 from __future__ import annotations
 

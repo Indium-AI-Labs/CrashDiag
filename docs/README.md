@@ -1,6 +1,6 @@
 # CrashDiag documentation
 
-These documents describe the v5 mechanically verified environment and its
+These documents describe the v6 mechanically verified environment and its
 reproducible training/evaluation workflow. Runtime registries in `crashdiag/`
 and `training/` are the executable source of truth.
 
@@ -10,8 +10,9 @@ and `training/` are the executable source of truth.
   ordered repair workflows.
 - [Actions](actions.md) — the 27-action space, sandbox mutations, and mechanical
   checks.
-- [Curriculum v5](curriculum-v5.md) — schema, strict workflow contract,
-  partial-credit reward, and version constants.
+- [Curriculum v5](curriculum-v5.md) — the original workflow contract.
+- [Migration from v5 to v6](migration-v5-to-v6.md) — benchmark leakage fix,
+  integrity invariants, and required clean-rerun sequence.
 - [Dataset generation](dataset-generation.md) — deterministic generation,
   validation, splits, and scaling.
 - [Notebook workflow](notebook-workflow.md) — the direct Qwen2.5-3B GRPO and
@@ -22,7 +23,7 @@ and `training/` are the executable source of truth.
 
 ## Quick facts
 
-| Property | v5 value |
+| Property | v6 value |
 |---|---|
 | Fault families | 52 |
 | Actions | 27 plus `wait_and_observe` |
@@ -32,4 +33,4 @@ and `training/` are the executable source of truth.
 | Generator defaults | 260,000 train / 1,300 held-out rows |
 | Workflow | one JSON object with an ordered `actions` array |
 | Reward | `resolved_subfaults / total_subfaults`; exact success tracked separately |
-| Curriculum version | 5 |
+| Curriculum version | 6 |

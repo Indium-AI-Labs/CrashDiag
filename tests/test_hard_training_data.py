@@ -1,4 +1,4 @@
-"""Tests for the answer-free v5 multi-action GRPO dataset handoff."""
+"""Tests for the answer-free workflow multi-action GRPO dataset handoff."""
 
 from __future__ import annotations
 

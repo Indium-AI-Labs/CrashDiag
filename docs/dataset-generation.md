@@ -1,6 +1,6 @@
-# CrashDiag v5 Dataset Generation
+# CrashDiag v6 Dataset Generation
 
-The v5 generator produces 52-task, multi-action datasets. The target train set is
+The v6 generator produces 52-task, multi-action datasets. The target train set is
 ~260k rows (5,000 per task); generation uses chunked streaming writes and
 process-level parallelism rather than building the full row list in memory.
 

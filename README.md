@@ -16,41 +16,22 @@ The environment includes 52 fault families, 27 repair actions plus a
 standalone replay evaluation, artifact persistence, reports, notebooks, tests,
 and Docker deployment.
 
-## Results
+## Benchmark integrity notice
 
-The released adapter is
+The previously released adapter is
 [`Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO`](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO).
 It starts directly from `Qwen/Qwen2.5-3B-Instruct`; no SFT checkpoint is used.
 
-Both policies were evaluated on the same 832 held-out v5 episodes: 52 fault
-families × 16 disjoint variations. The retained base control used the evaluator's
-generic format demonstration and a 64-token generation limit; the final adapter
-evaluation used no demonstration and a 96-token limit. These prompt and length
-differences are disclosed confounders, so the table is a retained-run comparison
-rather than a controlled ablation.
+**Do not use the historical v5 scores as valid benchmark results.** The v5 noisy
+profiles could execute `restart_app` as a supposed decoy even when restarting
+was a repair action for an active sub-fault inside a composite workflow. This
+pre-resolved part of 12 workflows before policy inference. Schema v6 fixes the
+generator, asserts that zero active sub-faults are resolved before inference,
+and rejects stale v5 datasets and sandbox deployments. Corrected base and GRPO
+results are pending a clean matched rerun.
 
-| Policy | Exact resolution | Mean verified reward | Strict JSON | Backend errors |
-|---|---:|---:|---:|---:|
-| Qwen2.5-3B-Instruct | 1.92% (16/832) | 11.88% | 63.58% | 0.00% |
-| CrashDiag GRPO | **27.40% (228/832)** | **41.91%** | **94.59%** | 0.00% |
-
-Exact resolution requires every injected subfault to be repaired. Mean verified
-reward is partial credit: `resolved_subfaults / total_subfaults`. This is one
-training run, so the table does not claim between-seed uncertainty.
-
-![Held-out per-fault comparison](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO/resolve/main/media/evaluation-comparison.png)
-
-The largest gains are concentrated in credential, environment, connection, and
-configuration faults; several fault families remain unchanged or regress
-slightly. Complete per-episode outputs and per-fault reports are published with
-the [model](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO/tree/main/evaluation).
-
-![GRPO training diagnostics](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO/resolve/main/media/training-diagnostics.png)
-
-Training loss and sampled reward are diagnostics only. The headline results
-above come from the separate mechanical replay evaluator. The unassisted adapter
-outscored the format-assisted base control, but a future matched-token rerun is
-still needed for a strict causal comparison.
+See [the v5-to-v6 migration note](docs/migration-v5-to-v6.md) for the failure
+mode, safeguards, and clean-rerun procedure.
 
 ## How it works
 
@@ -105,7 +86,7 @@ curl --fail http://127.0.0.1:8765/healthz
 For a public deployment, configure `CRASHDIAG_API_TOKEN` and the external URL as
 shown in [`.env.example`](.env.example).
 
-### Generate the retained v5 dataset shape
+### Generate the schema-v6 dataset shape
 
 ```bash
 python -m pip install -e ".[artifacts]"
@@ -159,7 +140,7 @@ model = AutoPeftModelForCausalLM.from_pretrained(
 ).eval()
 ```
 
-Use the exact v5 system prompt and validate generated workflows before execution.
+Use the exact v6 system prompt and validate generated workflows before execution.
 The complete inference example, training configuration, raw evaluations, and
 limitations are in the [model card](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO).
 
@@ -167,10 +148,9 @@ limitations are in the [model card](https://huggingface.co/Indium-AI-Labs/CrashD
 
 - Dataset seed: `42`
 - Dataset rows: 6,656 train / 832 held out
-- Training run: `20260820T101800IST-qwen2.5_3b-grpo`
-- Adapter evaluation: `20260820T101800IST-qwen2.5_3b-grpo-eval`
-- Base evaluation: `20260818T092323IST-qwen2.5_3b-base-eval`
-- Published adapter: [`Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO`](https://huggingface.co/Indium-AI-Labs/CrashDiag-Qwen2.5-3B-GRPO)
+- Scenario schema and curriculum: v6
+- Corrected training/evaluation run IDs: pending clean rerun
+- Historical v5 adapter: retained for audit only; its benchmark scores are invalidated
 
 ## Scope and limitations
 

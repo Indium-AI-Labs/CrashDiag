@@ -29,6 +29,7 @@ from training.hard_scenarios import (
     hard_observation_messages,
     hard_sample_seed,
     prepare_hard_scenario,
+    prepare_v6_scenario,
 )
 
 
@@ -63,6 +64,17 @@ def running_server(
 
 
 class HttpSandboxIntegrationTests(unittest.TestCase):
+    def test_v6_remote_scenario_attests_zero_pre_resolved_subfaults(self) -> None:
+        with running_server() as (_, base_url):
+            with HttpSandbox(base_url, api_token="integration-secret") as sandbox:
+                workflow, _, _ = prepare_v6_scenario(
+                    "memory_pressure_high",
+                    hard_sample_seed(42, "memory_pressure_high", 1),
+                    "noisy",
+                    sandbox=sandbox,
+                )
+                self.assertEqual(workflow.resolved_subfault_count(sandbox), 0)
+
     def tearDown(self) -> None:
         configure_reward_backend(sandbox_url=None, api_token=None)
 
@@ -204,7 +216,7 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
-            self.assertIn(5, payload["scenario_schema_versions"])
+            self.assertIn(6, payload["scenario_schema_versions"])
             self.assertTrue(payload["hard_scenario_batch"])
             self.assertTrue(payload["workflow_scenario_batch"])
 

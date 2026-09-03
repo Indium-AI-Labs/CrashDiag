@@ -51,7 +51,7 @@ For this sandbox, each repair action restores its target from deployment history
 configuration. The parameters value must therefore be exactly {} for every action. Never guess
 or emit names, versions, ports, or thresholds. Do not use markdown or prose.
 """
-"""The parameter-free multi-action policy contract used for all v5 data and rollouts."""
+"""The parameter-free multi-action policy contract used for workflow data and rollouts."""
 
 _FAULT_CLASSES = {fault_type().name: fault_type for fault_type in FAULT_TYPES}
 FAULT_NAMES = tuple(_FAULT_CLASSES)
@@ -146,7 +146,7 @@ def observation_messages(
     *,
     workflow_name: str | None = None,
 ) -> list[dict[str, str]]:
-    """Build the redacted operational prompt used by the v5 curriculum."""
+    """Build the redacted operational prompt used by the workflow curriculum."""
 
     # Keep the prompt projection beside the legacy common helpers while avoiding
     # an import cycle: ``hard_scenarios`` imports ``fault_for_name`` above.

@@ -1,6 +1,6 @@
-# CrashDiag v5 Action Space
+# CrashDiag v6 Action Space
 
-The v5 sandbox exposes **27 repair actions** plus the safe no-op fallback
+The v6 sandbox exposes **27 repair actions** plus the safe no-op fallback
 `wait_and_observe`. Every repair action takes `parameters: {}` only. Actions restore
 declared or historical sandbox state; a model-supplied parameter is never trusted.
 

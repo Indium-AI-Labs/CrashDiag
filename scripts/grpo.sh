@@ -65,7 +65,7 @@ echo "Installing training packages..."
 python3 -m pip uninstall -y torchao >/dev/null 2>&1 || true
 python3 -m pip install -e ".[train]"
 
-echo "Starting GRPO and final evaluation..."
+echo "Starting schema-v6 GRPO and final evaluation..."
 echo "completion_limit=${CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH} eval_limit=${CRASHDIAG_GRPO_EVAL_MAX_NEW_TOKENS} strict_json_reward=1 dataloader_workers=${CRASHDIAG_GRPO_DATALOADER_WORKERS} prefetch=${CRASHDIAG_GRPO_DATALOADER_PREFETCH}"
 if python3 -u -m training.grpo_pipeline; then
   status=0
