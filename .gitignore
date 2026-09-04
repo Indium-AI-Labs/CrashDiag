@@ -11,6 +11,7 @@ outputs/
 !/data/roadmap.md
 wandb/
 .venv/
+/.hud/
 .env
 env.txt
 data/roadmap.md

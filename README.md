@@ -74,6 +74,25 @@ Run the full test suite:
 python -m unittest discover -s tests -v
 ```
 
+### Run on HUD
+
+CrashDiag is published as a public [HUD environment](https://hud.ai/environments/0f0b6c5d-5569-49b2-a4fb-d5ae424f2d7e).
+It exposes the `diagnose` template and requires no runtime environment variables
+or external credentials. Each episode accepts a fault name, deterministic
+sample seed, and one of the `redacted`, `noisy`, or `shifted_noisy` observation
+profiles. The agent returns one strict ordered JSON workflow, which is executed
+and graded from the resulting sandbox state.
+
+Two public tasksets keep optimization and measurement disjoint:
+
+- [crashdiag-v6-train](https://hud.ai/tasksets/9ca07e3d-41bb-4234-a685-f9856d356b10): 6,656 training tasks (52 faults × 128 variations).
+- [crashdiag-v6-eval](https://hud.ai/tasksets/1494646e-582d-4b90-9b00-5f35b8ff208a): 832 held-out tasks (52 faults × 16 disjoint variations).
+
+On Windows, run the HUD CLI through WSL with Python 3.12 because HUD's local
+transport uses Unix-domain sockets. Maintainers can deploy and synchronize both
+tasksets with `bash scripts/publish_hud.sh`; the script forwards only
+`HUD_API_KEY` from `.env`.
+
 ### Start the HTTP sandbox
 
 Keep credentials in ignored `.env` or `env.txt` files. Never commit them.

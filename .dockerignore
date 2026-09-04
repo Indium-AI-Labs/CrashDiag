@@ -19,3 +19,10 @@ checkpoints
 README.md
 smoke_test.py
 compose.yaml
+compose.public.yaml
+paper
+notebooks
+docs
+deploy
+scripts
+.venv-python314-backup
