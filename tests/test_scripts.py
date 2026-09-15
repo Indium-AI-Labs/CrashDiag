@@ -26,6 +26,16 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("bucket_id,", source)
         self.assertIn('"--yes",', source)
 
+    def test_fourteen_b_runner_does_not_source_env_file(self) -> None:
+        script = (ROOT / "scripts" / "run_14b.sh").read_text(encoding="utf-8")
+        self.assertNotRegex(script, r"(?m)^\s*source ")
+        self.assertIn("python3 -u -m training.run_14b", script)
+        generator = (ROOT / "scripts" / "generate_docker_dataset.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--sandbox-backend docker", generator)
+        self.assertIn("CRASHDIAG_ENV_FILE", generator)
+
 
 if __name__ == "__main__":
     unittest.main()

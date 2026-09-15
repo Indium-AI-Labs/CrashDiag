@@ -46,6 +46,7 @@ crashdiag-calibrate-grpo = "training.calibrate_grpo:main"
 crashdiag-evaluate = "training.evaluate:main"
 crashdiag-evaluate-jsonl = "training.evaluate_jsonl:main"
 crashdiag-kaggle = "training.kaggle:main"
+crashdiag-run-14b = "training.run_14b:main"
 
 [tool.setuptools.packages.find]
 include = ["crashdiag*", "training*"]

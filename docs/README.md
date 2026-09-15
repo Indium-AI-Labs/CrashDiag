@@ -17,6 +17,8 @@ and `training/` are the executable source of truth.
   validation, splits, and scaling.
 - [Notebook workflow](notebook-workflow.md) — the direct Qwen2.5-3B GRPO and
   evaluation pipeline.
+- [Docker backend and 14B run](docker-backend.md) — real Compose victim stacks,
+  schema-v6 Docker datasets, and the Qwen2.5-14B matched baseline/GRPO procedure.
 - [Migration from v4](migration-v4-to-v5.md) — curriculum changes and rationale.
 - [Hugging Face model card](huggingface-model-card.md) — released adapter,
   evaluation, usage, provenance, and limitations.

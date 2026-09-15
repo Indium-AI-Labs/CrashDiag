@@ -1,8 +1,9 @@
 """Generate deterministic, mechanically validated CrashDiag training data.
 
 This command has only standard-library dependencies beyond the local
-``crashdiag`` package.  Every SFT target is executed against a fresh
-``MockSandbox`` and retained only after the selected fault reports resolved and
+``crashdiag`` package.  Every SFT target is executed against a fresh sandbox
+(``MockSandbox`` by default, or ``DockerSandbox`` when ``--sandbox-backend docker``
+is selected) and retained only after the selected fault reports resolved and
 the sandbox reports healthy.  The GRPO file contains the same prompts and
 scenario identifiers but deliberately contains no target completion.
 
@@ -21,7 +22,7 @@ import random
 import re
 import secrets
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,25 @@ DEFAULT_GRPO_TRAIN_OUTPUT = Path("data/grpo_train.jsonl")
 DEFAULT_GRPO_EVAL_OUTPUT = Path("data/grpo_eval.jsonl")
 DEFAULT_SUMMARY_OUTPUT = Path("data/grpo_summary.json")
 _FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _close_sandbox(sandbox: SandboxBackend) -> None:
+    close = getattr(sandbox, "close", None)
+    if callable(close):
+        close()
+
+
+def sandbox_factory_for_backend(name: str) -> Callable[[], SandboxBackend]:
+    """Return a constructor for the named dataset-generation backend."""
+
+    backend = (name or "mock").strip().lower()
+    if backend in {"", "mock"}:
+        return MockSandbox
+    if backend == "docker":
+        from crashdiag.sandbox_apps.docker import DockerSandbox
+
+        return DockerSandbox
+    raise ValueError(f"unknown sandbox backend {name!r}")
 
 
 def _automatic_run_id() -> str:
@@ -170,6 +190,7 @@ def build_validated_sample(
     base_seed: int,
     variation_index: int,
     split: str = "train",
+    sandbox_factory: Callable[[], SandboxBackend] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build matching SFT/GRPO rows after executing the expert workflow.
 
@@ -190,24 +211,33 @@ def build_validated_sample(
         raise ValueError("split must be 'train' or 'eval'")
 
     current_seed = sample_seed(base_seed, fault_name, variation_index)
-    workflow, sandbox_backend, _ = prepare_scenario(fault_name, current_seed)
-    if not isinstance(sandbox_backend, MockSandbox):
-        raise TypeError("dataset generation requires MockSandbox state access")
-    sandbox = sandbox_backend
-
-    observation = sandbox.observe()
-    target = expert_workflow(fault_name)
-    for action in target["actions"]:
-        sandbox.execute_action(action["action"], action["parameters"])
-
-    resolved = workflow.is_resolved(sandbox)
-    health_after = sandbox.health_check()
-    healthy = isinstance(health_after, Mapping) and health_after.get("healthy") is True
-    if not resolved or not healthy:
-        raise RuntimeError(
-            f"expert workflow failed mechanical validation for {fault_name!r}: "
-            f"resolved={resolved}, health={health_after!r}"
+    factory = sandbox_factory or MockSandbox
+    sandbox_backend = factory()
+    try:
+        workflow, sandbox_backend, _ = prepare_scenario(
+            fault_name,
+            current_seed,
+            sandbox=sandbox_backend,
         )
+        if not isinstance(sandbox_backend, SandboxBackend):
+            raise TypeError("dataset generation requires a SandboxBackend")
+        sandbox = sandbox_backend
+
+        observation = sandbox.observe()
+        target = expert_workflow(fault_name)
+        for action in target["actions"]:
+            sandbox.execute_action(action["action"], action["parameters"])
+
+        resolved = workflow.is_resolved(sandbox)
+        health_after = sandbox.health_check()
+        healthy = isinstance(health_after, Mapping) and health_after.get("healthy") is True
+        if not resolved or not healthy:
+            raise RuntimeError(
+                f"expert workflow failed mechanical validation for {fault_name!r}: "
+                f"resolved={resolved}, health={health_after!r}"
+            )
+    finally:
+        _close_sandbox(sandbox_backend)
 
     common: dict[str, Any] = {
         "fault_name": workflow.name,
@@ -265,6 +295,7 @@ def generate_records(
     seed: int = 42,
     start_variation: int = 0,
     split: str = "train",
+    sandbox_factory: Callable[[], SandboxBackend] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Generate equally sized strata for all 52 workflows."""
 
@@ -297,6 +328,7 @@ def generate_records(
                 base_seed=seed,
                 variation_index=variation_index,
                 split=split,
+                sandbox_factory=sandbox_factory,
             )
             sft_rows.append(sft)
             grpo_rows.append(grpo)
@@ -320,6 +352,7 @@ def generate_datasets(
     train_samples_per_fault: int = DEFAULT_TRAIN_SAMPLES_PER_FAULT,
     eval_samples_per_fault: int = DEFAULT_EVAL_SAMPLES_PER_FAULT,
     seed: int = 42,
+    sandbox_backend: str = "mock",
 ) -> dict[str, int]:
     """Validate and write four stratified datasets plus a summary."""
 
@@ -339,17 +372,20 @@ def generate_datasets(
             f"({EVAL_START_VARIATION}); choose a smaller train set"
         )
 
+    factory = sandbox_factory_for_backend(sandbox_backend)
     sft_train, grpo_train = generate_records(
         samples_per_fault=train_samples_per_fault,
         seed=seed,
         start_variation=0,
         split="train",
+        sandbox_factory=factory,
     )
     sft_eval, grpo_eval = generate_records(
         samples_per_fault=eval_samples_per_fault,
         seed=seed,
         start_variation=EVAL_START_VARIATION,
         split="eval",
+        sandbox_factory=factory,
     )
     counts = {
         "sft_train": write_jsonl(paths["sft_train"], sft_train),
@@ -373,6 +409,7 @@ def generate_datasets(
         "seed": seed,
         "mechanically_validated": True,
         "targets_included": False,
+        "sandbox_backend": sandbox_backend,
         "workflow_count": len(WORKFLOW_NAMES),
         "train": {
             "rows": counts["sft_train"],
@@ -432,6 +469,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="evaluation variations for each workflow (default: 25)",
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--sandbox-backend",
+        choices=("mock", "docker"),
+        default=(os.environ.get("CRASHDIAG_SANDBOX_BACKEND", "mock").strip().lower() or "mock"),
+        help="mechanical backend used to prove each row (default: mock)",
+    )
     add_artifact_arguments(parser)
     return parser
 
@@ -466,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "seed": args.seed,
                     "train_samples_per_fault": args.train_samples_per_fault,
                     "eval_samples_per_fault": args.eval_samples_per_fault,
+                    "sandbox_backend": args.sandbox_backend,
                 },
             )
         counts = generate_datasets(
@@ -477,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             train_samples_per_fault=args.train_samples_per_fault,
             eval_samples_per_fault=args.eval_samples_per_fault,
             seed=args.seed,
+            sandbox_backend=args.sandbox_backend,
         )
         if uploader is not None:
             uploader.upload_files(

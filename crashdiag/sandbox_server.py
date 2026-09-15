@@ -1,11 +1,9 @@
 """Safe HTTP service for disposable CrashDiag simulation sessions.
 
-This server deliberately exposes :class:`~crashdiag.sandbox_apps.mock.MockSandbox`
-state, not the container host.  Fault injection changes in-memory fields only: it
-never allocates memory to force an OOM, fills a filesystem, installs packages, or
-edits a real reverse proxy.  That makes the service suitable for dataset generation
-and training-loop integration before a separately isolated real-infrastructure
-backend is implemented.
+This server exposes a session-scoped :class:`~crashdiag.sandbox_apps.mock.SandboxBackend`.
+The default ``mock`` backend mutates in-memory fields only.  ``CRASHDIAG_SANDBOX_BACKEND=docker``
+selects a per-session Compose victim stack whose health is read from real
+processes, volumes, and ``docker inspect``.
 
 API (all request and response bodies are JSON):
 
@@ -44,9 +42,24 @@ from typing import Any, Callable, ClassVar, Iterator, Mapping
 from urllib.parse import unquote, urlsplit
 
 from .faults.modules import ALL_FAULTS
+from .sandbox_apps.docker import sandbox_backend_name, sandbox_factory_from_env
 from .sandbox_apps.mock import MockSandbox, SandboxBackend
 
 LOGGER = logging.getLogger("crashdiag.sandbox_server")
+
+
+def _dispose_sandbox(sandbox: SandboxBackend | None) -> None:
+    """Release backend resources (Compose stacks, child processes)."""
+
+    if sandbox is None:
+        return
+    close = getattr(sandbox, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:
+        LOGGER.exception("failed to dispose sandbox backend")
 
 
 class SessionNotFound(LookupError):
@@ -130,7 +143,8 @@ class SessionStore:
                 session.lock.release()
                 expired.append(session_id)
         for session_id in expired:
-            del self._sessions[session_id]
+            sandbox = self._sessions.pop(session_id).sandbox
+            _dispose_sandbox(sandbox)
         return len(expired)
 
     def purge_expired(self) -> int:
@@ -210,9 +224,11 @@ class SessionStore:
         if not isinstance(sandbox, SandboxBackend):
             raise TypeError("sandbox_factory must return a SandboxBackend")
         with self.lease(session_id) as session:
+            previous = session.sandbox
             session.sandbox = sandbox
             session.operation_count = 0
-            return session.sandbox
+        _dispose_sandbox(previous)
+        return sandbox
 
     def delete(self, session_id: str) -> None:
         """Delete a live session, or raise :class:`SessionNotFound`."""
@@ -227,6 +243,7 @@ class SessionStore:
                 del self._sessions[session_id]
             finally:
                 session.lock.release()
+        _dispose_sandbox(session.sandbox)
 
     def stats(self) -> dict[str, int]:
         """Return non-sensitive service capacity counters."""
@@ -298,6 +315,7 @@ class SandboxRequestHandler(BaseHTTPRequestHandler):
                     {
                         "status": "ok",
                         "service": "crashdiag-sandbox",
+                        "backend": self.sandbox_server.backend_name,
                         "scenario_schema_versions": [1, 3, 4, 6],
                         "hard_scenario_batch": True,
                         "workflow_scenario_batch": True,
@@ -729,7 +747,8 @@ class SandboxHTTPServer(ThreadingHTTPServer):
         max_operations_per_session: int = 64,
         max_workers: int = 64,
         request_timeout_seconds: float = 10.0,
-        sandbox_factory: Callable[[], SandboxBackend] = MockSandbox,
+        sandbox_factory: Callable[[], SandboxBackend] | None = None,
+        backend_name: str | None = None,
     ) -> None:
         if bearer_token is not None and token is not None and bearer_token != token:
             raise ValueError("bearer_token and token disagree")
@@ -749,6 +768,13 @@ class SandboxHTTPServer(ThreadingHTTPServer):
             or request_timeout_seconds <= 0
         ):
             raise ValueError("request_timeout_seconds must be a positive finite number")
+        self.backend_name = (
+            backend_name
+            if backend_name is not None
+            else sandbox_backend_name()
+        )
+        if sandbox_factory is None:
+            sandbox_factory = sandbox_factory_from_env()
         self.bearer_token = selected_token
         self.max_workers = max_workers
         self.request_timeout_seconds = float(request_timeout_seconds)
@@ -909,6 +935,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
         help="per-connection socket timeout in seconds",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("mock", "docker"),
+        default=sandbox_backend_name() if sandbox_backend_name() in {"mock", "docker"} else "mock",
+        help="sandbox backend (default: CRASHDIAG_SANDBOX_BACKEND or mock)",
+    )
     return parser
 
 
@@ -919,6 +951,7 @@ def main(argv: list[str] | None = None) -> int:
     if not 0 <= args.port <= 65535:
         raise SystemExit("port must be between 0 and 65535")
     logging.basicConfig(level=os.environ.get("CRASHDIAG_LOG_LEVEL", "INFO"))
+    os.environ["CRASHDIAG_SANDBOX_BACKEND"] = args.backend
     server = SandboxHTTPServer(
         (args.host, args.port),
         bearer_token=args.token,
@@ -927,9 +960,16 @@ def main(argv: list[str] | None = None) -> int:
         max_operations_per_session=args.max_operations_per_session,
         max_workers=args.max_workers,
         request_timeout_seconds=args.request_timeout,
+        backend_name=args.backend,
+        sandbox_factory=sandbox_factory_from_env(),
     )
     host, port = server.server_address[:2]
-    LOGGER.info("safe mock sandbox listening on http://%s:%s", host, port)
+    LOGGER.info(
+        "crashdiag sandbox backend=%s listening on http://%s:%s",
+        args.backend,
+        host,
+        port,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

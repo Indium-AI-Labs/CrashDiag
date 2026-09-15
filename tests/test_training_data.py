@@ -23,7 +23,12 @@ from training.common import (
     resolve_precision,
 )
 from training.artifacts import ArtifactError
-from training.generate_dataset import generate_datasets, generate_records, main
+from training.generate_dataset import (
+    generate_datasets,
+    generate_records,
+    main,
+    sandbox_factory_for_backend,
+)
 from training.generate_dataset import expert_workflow, prepare_scenario
 from training.sft import _compatible_config_kwargs, build_parser
 from training.grpo import _compatible_config_kwargs as grpo_compatible_config_kwargs
@@ -128,6 +133,16 @@ class DatasetGenerationTests(unittest.TestCase):
                 sandbox.execute_action(action["action"], action["parameters"])
             self.assertTrue(workflow.is_resolved(sandbox))
             self.assertTrue(sandbox.health_check()["healthy"])
+
+    def test_sandbox_factory_accepts_mock_and_rejects_unknown_backends(self) -> None:
+        from crashdiag.sandbox_apps.mock import MockSandbox
+
+        self.assertIs(sandbox_factory_for_backend("mock"), MockSandbox)
+        from crashdiag.sandbox_apps.docker import DockerSandbox
+
+        self.assertIs(sandbox_factory_for_backend("docker"), DockerSandbox)
+        with self.assertRaises(ValueError):
+            sandbox_factory_for_backend("coolify")
 
     def test_generation_is_byte_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -425,6 +440,16 @@ class GrpoConfigTests(unittest.TestCase):
             {"output_dir": "outputs/grpo", "max_steps": 4, "max_prompt_length": 1024},
         )
         self.assertEqual(kwargs, {"output_dir": "outputs/grpo", "max_steps": 4})
+
+    def test_direct_grpo_allows_4bit_base_without_sft_adapter(self) -> None:
+        source = Path(__file__).resolve().parents[1].joinpath("training", "grpo.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn(
+            "--load-in-4bit requires an SFT adapter passed through --model",
+            source,
+        )
+        self.assertIn("prepare_4bit_qlora_model(base_model)", source)
 
 
 if __name__ == "__main__":

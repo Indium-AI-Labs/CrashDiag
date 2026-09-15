@@ -83,6 +83,26 @@ class GrpoPipelineSecurityTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "regenerate schema v6"):
                 grpo_pipeline.require_current_dataset(path)
 
+    def test_sandbox_healthz_rejects_non_docker_when_required(self) -> None:
+        class _Response:
+            def read(self) -> bytes:
+                return json.dumps(
+                    {"scenario_schema_versions": [6], "backend": "mock"}
+                ).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        with (
+            patch.dict(os.environ, {"CRASHDIAG_REQUIRE_SANDBOX_BACKEND": "docker"}, clear=False),
+            patch("training.grpo_pipeline.request.urlopen", return_value=_Response()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "expected 'docker'"):
+                grpo_pipeline.require_current_sandbox("http://sandbox.example.com")
+
     def test_command_logging_redacts_sensitive_flag_values(self) -> None:
         command = ["worker", "--sandbox-token", "do-not-print", "--max-steps", "1"]
         output = io.StringIO()

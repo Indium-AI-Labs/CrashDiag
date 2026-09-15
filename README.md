@@ -51,7 +51,7 @@ fault injection → observation → policy → ordered actions → sandbox state
 
 | Path | Purpose |
 |---|---|
-| [`crashdiag/`](crashdiag/) | fault registry, policy contract, sandboxes, orchestrator, and verifier |
+| [`crashdiag/`](crashdiag/) | fault registry, policy contract, sandboxes (mock, HTTP, Docker victim), orchestrator, and verifier |
 | [`training/`](training/) | dataset generation, direct GRPO, evaluation, reporting, and the end-to-end pipeline |
 | [`notebooks/qwen2.5_3b/`](notebooks/qwen2.5_3b/) | base eval, GRPO, adapter eval, and complete-run notebooks |
 | [`scripts/`](scripts/) | persistent training and dataset lifecycle entry points |
