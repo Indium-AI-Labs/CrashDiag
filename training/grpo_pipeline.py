@@ -45,13 +45,9 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def model_slug() -> str:
-    return os.environ.get("CRASHDIAG_MODEL_SLUG", "qwen2.5_3b").strip() or "qwen2.5_3b"
-
-
 def ist_run_id(stage: str) -> str:
     stamp = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%dT%H%M%SIST")
-    return f"{stamp}-{model_slug()}-{stage}"
+    return f"{stamp}-qwen2.5_3b-{stage}"
 
 
 def _redacted_command(command: list[str]) -> list[str]:
@@ -127,14 +123,6 @@ def require_current_sandbox(sandbox_url: str) -> None:
             f"sandbox does not advertise scenario schema v{HARD_SCENARIO_SCHEMA_VERSION}; "
             "deploy the current CrashDiag sandbox before training"
         )
-    required_backend = os.environ.get("CRASHDIAG_REQUIRE_SANDBOX_BACKEND", "").strip().lower()
-    if required_backend:
-        backend = payload.get("backend") if isinstance(payload, dict) else None
-        if backend != required_backend:
-            raise RuntimeError(
-                f"sandbox backend is {backend!r}; expected {required_backend!r}. "
-                "Deploy the Docker sandbox before the 14B run."
-            )
 
 
 def main() -> int:
@@ -173,17 +161,6 @@ def main() -> int:
     # previous two-sample run collapsed to identical 42-token completions.
     num_generations = os.environ.get("CRASHDIAG_GRPO_NUM_GENERATIONS", "4")
     max_completion = os.environ.get("CRASHDIAG_GRPO_MAX_COMPLETION_LENGTH", "96")
-    base_model = os.environ.get(
-        "CRASHDIAG_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct"
-    ).strip() or "Qwen/Qwen2.5-3B-Instruct"
-    load_in_4bit = os.environ.get("CRASHDIAG_GRPO_LOAD_IN_4BIT", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    batch_size = os.environ.get("CRASHDIAG_GRPO_BATCH_SIZE", "4").strip() or "4"
-    grad_accum = os.environ.get("CRASHDIAG_GRPO_GRAD_ACCUM", "2").strip() or "2"
-    precision = os.environ.get("CRASHDIAG_GRPO_PRECISION", "bf16").strip() or "bf16"
     # Keep generation and final evaluation limits aligned. The previous
     # evaluator used 64 tokens while training allowed 96, truncating the
     # learned workflow JSON and collapsing exact success.
@@ -243,23 +220,22 @@ def main() -> int:
             "-m",
             "training.grpo",
             "--model",
-            base_model,
+            "Qwen/Qwen2.5-3B-Instruct",
             "--train-file",
             str(train_file),
             "--eval-file",
             str(eval_file),
             "--output-dir",
             str(REPO_ROOT / "outputs" / "grpo"),
-            "--load-in-4bit" if load_in_4bit else "--no-load-in-4bit",
+            "--no-load-in-4bit",
             "--precision",
-            precision,
+            "bf16",
             # Four generations require the global train/eval batch to be
-            # divisible by four. Keep the effective batch at eight unless the
-            # 14B QLoRA path lowers per-device batch.
+            # divisible by four. Keep the effective batch at eight.
             "--batch-size",
-            batch_size,
+            "4",
             "--gradient-accumulation-steps",
-            grad_accum,
+            "2",
             "--num-generations",
             num_generations,
             "--learning-rate",

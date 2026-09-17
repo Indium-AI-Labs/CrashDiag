@@ -750,50 +750,22 @@ def main(argv: list[str] | None = None) -> int:
         peft_config = None
         model_init_kwargs = None
     else:
+        model = args.model
+        peft_config = (
+            LoraConfig(
+                r=args.lora_r,
+                lora_alpha=args.lora_alpha,
+                lora_dropout=args.lora_dropout,
+                bias="none",
+                task_type="CAUSAL_LM",
+                target_modules="all-linear",
+            )
+            if args.lora
+            else None
+        )
+        model_init_kwargs = {"dtype": dtype}
         if args.load_in_4bit:
-            if not torch.cuda.is_available():
-                raise SystemExit("--load-in-4bit requires a CUDA GPU")
-            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-            base_model = AutoModelForCausalLM.from_pretrained(
-                args.model,
-                quantization_config=BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=dtype,
-                    bnb_4bit_use_double_quant=True,
-                ),
-                device_map={"": local_rank},
-                trust_remote_code=args.trust_remote_code,
-            )
-            model = prepare_4bit_qlora_model(base_model)
-            peft_config = (
-                LoraConfig(
-                    r=args.lora_r,
-                    lora_alpha=args.lora_alpha,
-                    lora_dropout=args.lora_dropout,
-                    bias="none",
-                    task_type="CAUSAL_LM",
-                    target_modules="all-linear",
-                )
-                if args.lora
-                else None
-            )
-            model_init_kwargs = None
-        else:
-            model = args.model
-            peft_config = (
-                LoraConfig(
-                    r=args.lora_r,
-                    lora_alpha=args.lora_alpha,
-                    lora_dropout=args.lora_dropout,
-                    bias="none",
-                    task_type="CAUSAL_LM",
-                    target_modules="all-linear",
-                )
-                if args.lora
-                else None
-            )
-            model_init_kwargs = {"dtype": dtype}
+            raise SystemExit("--load-in-4bit requires an SFT adapter passed through --model")
 
     eval_enabled = eval_dataset is not None
     config = GRPOConfig(**_compatible_config_kwargs(GRPOConfig, dict(

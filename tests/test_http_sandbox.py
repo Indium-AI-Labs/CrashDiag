@@ -17,7 +17,6 @@ from crashdiag.sandbox_apps.http import (
     SandboxHTTPError,
     SandboxTransportError,
 )
-from crashdiag.sandbox_apps.mock import MockSandbox
 from crashdiag.sandbox_server import SandboxHTTPServer
 from training.common import FAULT_NAMES
 from training.generate_dataset import sample_seed
@@ -52,8 +51,6 @@ def running_server(
         max_operations_per_session=max_operations_per_session,
         max_workers=max_workers,
         request_timeout_seconds=request_timeout_seconds,
-        backend_name="mock",
-        sandbox_factory=MockSandbox,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -220,7 +217,6 @@ class HttpSandboxIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["service"], "crashdiag-sandbox")
             self.assertIn(6, payload["scenario_schema_versions"])
-            self.assertEqual(payload["backend"], "mock")
             self.assertTrue(payload["hard_scenario_batch"])
             self.assertTrue(payload["workflow_scenario_batch"])
 
